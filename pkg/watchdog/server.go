@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,13 +14,15 @@ import (
 
 // Config holds the server configuration
 type Config struct {
-	Port int
+	Port       int
+	SocketPath string // If set, listen on this Unix socket instead of TCP
 }
 
 // Server is the HTTP server for the watchdog
 type Server struct {
 	server *http.Server
 	logger *slog.Logger
+	cfg    Config
 }
 
 // Ensure Server implements StrictServerInterface
@@ -31,6 +34,7 @@ func NewServer(cfg Config) *Server {
 	
 	s := &Server{
 		logger: logger,
+		cfg:    cfg,
 	}
 
 	// Create the strict handler
@@ -41,8 +45,11 @@ func NewServer(cfg Config) *Server {
 	HandlerFromMux(handler, mux)
 
 	s.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: mux,
+	}
+	
+	if cfg.SocketPath == "" {
+		s.server.Addr = fmt.Sprintf(":%d", cfg.Port)
 	}
 
 	return s
@@ -50,7 +57,31 @@ func NewServer(cfg Config) *Server {
 
 // Start runs the server
 func (s *Server) Start() error {
-	s.logger.Info("starting watchdog server", "addr", s.server.Addr)
+	s.logger.Info("starting watchdog server")
+	
+	if s.cfg.SocketPath != "" {
+		// Clean up old socket
+		_ = os.Remove(s.cfg.SocketPath)
+		
+		listener, err := net.Listen("unix", s.cfg.SocketPath)
+		if err != nil {
+			return fmt.Errorf("failed to listen on socket %s: %w", s.cfg.SocketPath, err)
+		}
+		
+		// Ensure permissions (anyone can write, so Kernel can access from host if mapped properly)
+		// Inside container, root/aule user matters.
+		if err := os.Chmod(s.cfg.SocketPath, 0777); err != nil {
+			s.logger.Warn("failed to chmod socket", "error", err)
+		}
+		
+		s.logger.Info("listening on unix socket", "path", s.cfg.SocketPath)
+		if err := s.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("watchdog server error: %w", err)
+		}
+		return nil
+	}
+	
+	s.logger.Info("listening on tcp", "addr", s.server.Addr)
 	if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("watchdog server error: %w", err)
 	}

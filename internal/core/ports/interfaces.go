@@ -35,4 +35,9 @@ type Repository interface {
 
 	// UpdateWorkerStatus updates just the status of a worker.
 	UpdateWorkerStatus(ctx context.Context, id domain.WorkerID, status domain.HealthStatus) error
+
+	// Job Management
+	SaveJob(ctx context.Context, job domain.Job) error
+	GetJob(ctx context.Context, id domain.JobID) (domain.Job, error)
+	ListJobs(ctx context.Context) ([]domain.Job, error)
 }
