@@ -1,6 +1,7 @@
 import { Sidebar } from "@/components/workspace/Sidebar"
 import { AgentStream } from "@/components/workspace/AgentStream"
 import { ChatInterface } from "@/components/agent/ChatInterface"
+import { SettingsPanel } from "@/components/workspace/SettingsPanel"
 import { useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
@@ -9,6 +10,16 @@ const queryClient = new QueryClient()
 
 export default function Workspace() {
     const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+    const [viewMode, setViewMode] = useState<"chat" | "job" | "settings">("chat")
+
+    const handleSelectJob = (id: string) => {
+        setSelectedJobId(id)
+        setViewMode("job")
+    }
+
+    const handleOpenSettings = () => {
+        setViewMode("settings")
+    }
 
     return (
         <QueryClientProvider client={queryClient}>
@@ -17,7 +28,8 @@ export default function Workspace() {
                 <aside className="w-80 flex-shrink-0 hidden md:block">
                     <Sidebar
                         currentJobId={selectedJobId}
-                        onSelectJob={setSelectedJobId}
+                        onSelectJob={handleSelectJob}
+                        onOpenSettings={handleOpenSettings}
                     />
                 </aside>
 
@@ -25,10 +37,15 @@ export default function Workspace() {
                 <main className="flex-1 min-w-0 flex flex-col gap-4">
                     {/* Top Bar / Navigation could go here */}
 
-                    {selectedJobId ? (
+                    {viewMode === "settings" ? (
+                        <SettingsPanel onClose={() => setViewMode(selectedJobId ? "job" : "chat")} />
+                    ) : selectedJobId && viewMode === "job" ? (
                         <div className="h-full relative">
                             <button
-                                onClick={() => setSelectedJobId(null)}
+                                onClick={() => {
+                                    setSelectedJobId(null)
+                                    setViewMode("chat")
+                                }}
                                 className="absolute top-4 right-4 z-10 bg-white/80 p-2 rounded-full border shadow-sm hover:bg-white transition"
                             >
                                 ✕
@@ -36,7 +53,7 @@ export default function Workspace() {
                             <AgentStream jobId={selectedJobId} />
                         </div>
                     ) : (
-                        <ChatInterface onOpenJob={setSelectedJobId} />
+                        <ChatInterface onOpenJob={handleSelectJob} />
                     )}
                 </main>
             </div>

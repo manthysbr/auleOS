@@ -47,4 +47,19 @@ type Repository interface {
 	SaveJob(ctx context.Context, job domain.Job) error
 	GetJob(ctx context.Context, id domain.JobID) (domain.Job, error)
 	ListJobs(ctx context.Context) ([]domain.Job, error)
+
+	// Conversations
+	CreateConversation(ctx context.Context, conv domain.Conversation) error
+	GetConversation(ctx context.Context, id domain.ConversationID) (domain.Conversation, error)
+	ListConversations(ctx context.Context) ([]domain.Conversation, error)
+	UpdateConversationTitle(ctx context.Context, id domain.ConversationID, title string) error
+	DeleteConversation(ctx context.Context, id domain.ConversationID) error
+
+	// Messages
+	AddMessage(ctx context.Context, msg domain.Message) error
+	ListMessages(ctx context.Context, convID domain.ConversationID, limit int) ([]domain.Message, error)
+
+	// Settings
+	GetSetting(ctx context.Context, key string) (string, error)
+	SaveSetting(ctx context.Context, key string, value string) error
 }

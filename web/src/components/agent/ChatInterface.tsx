@@ -2,38 +2,20 @@ import { useState, useRef, useEffect } from "react"
 import { Send, Bot, User, Cpu, Terminal } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { api as client } from "@/lib/api"
-
-interface Message {
-    id: string
-    role: "user" | "assistant"
-    content: string
-    thought?: string
-    steps?: Array<{
-        thought?: string
-        action?: string
-        action_input?: Record<string, unknown>
-        observation?: string
-        is_final_answer?: boolean
-        final_answer?: string
-    }>
-    toolCall?: {
-        name: string
-        args: any
-    }
-}
+import { useConversationStore, type Message } from "@/store/conversations"
 
 interface ChatInterfaceProps {
     onOpenJob?: (jobId: string) => void
 }
 
 export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
-    const [messages, setMessages] = useState<Message[]>([
-        {
-            id: "welcome",
-            role: "assistant",
-            content: "I am auleOS. How can I help you today?",
-        }
-    ])
+    const {
+        activeConversationId,
+        messages,
+        addLocalMessage,
+        fetchConversations,
+    } = useConversationStore()
+
     const [input, setInput] = useState("")
     const [isLoading, setIsLoading] = useState(false)
     const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -50,22 +32,27 @@ export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
         e.preventDefault()
         if (!input.trim() || isLoading) return
 
-        const userMsg: Message = {
-            id: Date.now().toString(),
-            role: "user",
-            content: input,
-        }
-
-        setMessages(prev => [...prev, userMsg])
+        const userContent = input.trim()
         setInput("")
         setIsLoading(true)
+
+        // Optimistic local user message
+        const userMsg: Message = {
+            id: `local-${Date.now()}`,
+            conversation_id: activeConversationId ?? "",
+            role: "user",
+            content: userContent,
+            created_at: new Date().toISOString(),
+        }
+        addLocalMessage(userMsg)
 
         try {
             const { data, error } = await client.POST("/v1/agent/chat", {
                 body: {
-                    message: userMsg.content,
-                    model: "llama3.2"
-                }
+                    message: userContent,
+                    model: "llama3.2",
+                    ...(activeConversationId ? { conversation_id: activeConversationId } : {}),
+                },
             })
 
             if (error) {
@@ -73,33 +60,58 @@ export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
             }
 
             if (data) {
-                const assistantMsg: Message = {
-                    id: (Date.now() + 1).toString(),
-                    role: "assistant", // Logic mapping
-                    content: data.response || "",
-                    thought: data.thought,
-                    steps: data.steps,
-                    toolCall: data.tool_call as any
+                // If a new conversation was created, update store
+                if (data.conversation_id && data.conversation_id !== activeConversationId) {
+                    useConversationStore.setState({
+                        activeConversationId: data.conversation_id,
+                    })
+                    // Refresh conversation list
+                    fetchConversations()
                 }
-                setMessages(prev => [...prev, assistantMsg])
 
+                const assistantMsg: Message = {
+                    id: `local-${Date.now() + 1}`,
+                    conversation_id: data.conversation_id ?? activeConversationId ?? "",
+                    role: "assistant",
+                    content: data.response || "",
+                    thought: data.thought ?? undefined,
+                    steps: data.steps as Message["steps"],
+                    tool_call: data.tool_call as Message["tool_call"],
+                    created_at: new Date().toISOString(),
+                }
+                addLocalMessage(assistantMsg)
+
+                // Check for job ID in tool call
                 const toolCall = data.tool_call as { name?: string; args?: Record<string, unknown> } | undefined
                 const maybeJobId = toolCall?.args?.job_id
-                if (toolCall?.name === "generate_image" && typeof maybeJobId === "string" && onOpenJob) {
+                if (typeof maybeJobId === "string" && onOpenJob) {
                     onOpenJob(maybeJobId)
                 }
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             const errorMsg: Message = {
-                id: (Date.now() + 1).toString(),
+                id: `local-${Date.now() + 1}`,
+                conversation_id: activeConversationId ?? "",
                 role: "assistant",
-                content: `Error: ${err.message}`
+                content: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
+                created_at: new Date().toISOString(),
             }
-            setMessages(prev => [...prev, errorMsg])
+            addLocalMessage(errorMsg)
         } finally {
             setIsLoading(false)
         }
     }
+
+    // Show welcome message when no conversation is active and no messages
+    const displayMessages = messages.length > 0
+        ? messages
+        : [{
+            id: "welcome",
+            conversation_id: "",
+            role: "assistant" as const,
+            content: "I am auleOS. How can I help you today?",
+            created_at: new Date().toISOString(),
+        }]
 
     return (
         <div className="flex flex-col h-full bg-white/50 backdrop-blur-xl rounded-2xl border border-white/20 shadow-xl overflow-hidden">
@@ -111,7 +123,7 @@ export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                {messages.map((msg) => (
+                {displayMessages.map((msg) => (
                     <div
                         key={msg.id}
                         className={cn(
@@ -163,14 +175,14 @@ export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
                             )}
 
                             {/* Tool Call Visualization */}
-                            {msg.toolCall && (
+                            {msg.tool_call && (
                                 <div className="text-xs font-mono bg-black/80 text-green-400 rounded-lg p-3 border border-green-900/50 shadow-inner">
                                     <div className="flex items-center gap-2 mb-1 text-green-500/80 border-b border-green-900/50 pb-1">
                                         <Terminal className="w-3 h-3" />
-                                        <span>Tool: {msg.toolCall.name}</span>
+                                        <span>Tool: {msg.tool_call.name}</span>
                                     </div>
                                     <pre className="overflow-x-auto whitespace-pre-wrap">
-                                        {JSON.stringify(msg.toolCall.args, null, 2)}
+                                        {JSON.stringify(msg.tool_call.args, null, 2)}
                                     </pre>
                                 </div>
                             )}
@@ -184,10 +196,9 @@ export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
                                         : "bg-white border border-black/5 text-foreground rounded-tl-none"
                                 )}
                             >
-                                {/* Heuristic for Image Rendering */}
-                                {msg.toolCall?.name === 'generate_image' && msg.toolCall.args.url ? (
+                                {msg.tool_call?.name === 'generate_image' && msg.tool_call.args?.url ? (
                                     <div className="rounded-lg overflow-hidden border border-black/10 mt-1">
-                                        <img src={msg.toolCall.args.url} alt="Generated" className="w-full h-auto object-cover" />
+                                        <img src={String(msg.tool_call.args.url)} alt="Generated" className="w-full h-auto object-cover" />
                                     </div>
                                 ) : (
                                     <p className="whitespace-pre-wrap">{msg.content}</p>

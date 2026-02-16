@@ -24,16 +24,54 @@ import (
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
 )
 
+// Defines values for ConnectionTestResultStatus.
+const (
+	ConnectionTestResultStatusError ConnectionTestResultStatus = "error"
+	ConnectionTestResultStatusOk    ConnectionTestResultStatus = "ok"
+)
+
+// Defines values for MessageRole.
+const (
+	Assistant MessageRole = "assistant"
+	System    MessageRole = "system"
+	Tool      MessageRole = "tool"
+	User      MessageRole = "user"
+)
+
+// Defines values for ProviderConfigMode.
+const (
+	Local  ProviderConfigMode = "local"
+	Remote ProviderConfigMode = "remote"
+)
+
+// Defines values for TestConnectionJSONBodyProvider.
+const (
+	Image TestConnectionJSONBodyProvider = "image"
+	Llm   TestConnectionJSONBodyProvider = "llm"
+)
+
+// AppConfig defines model for AppConfig.
+type AppConfig struct {
+	Providers *struct {
+		Image *ProviderConfig `json:"image,omitempty"`
+		Llm   *ProviderConfig `json:"llm,omitempty"`
+	} `json:"providers,omitempty"`
+}
+
 // ChatRequest defines model for ChatRequest.
 type ChatRequest struct {
-	Message string  `json:"message"`
-	Model   *string `json:"model,omitempty"`
+	// ConversationId Optional. If omitted, a new conversation is created automatically.
+	ConversationId *string `json:"conversation_id,omitempty"`
+	Message        string  `json:"message"`
+	Model          *string `json:"model,omitempty"`
 }
 
 // ChatResponse defines model for ChatResponse.
 type ChatResponse struct {
-	Response *string      `json:"response,omitempty"`
-	Steps    *[]ReActStep `json:"steps,omitempty"`
+	// ConversationId The conversation this message belongs to
+	ConversationId *string      `json:"conversation_id,omitempty"`
+	Response       *string      `json:"response,omitempty"`
+	Steps          *[]ReActStep `json:"steps,omitempty"`
 
 	// Thought Chain of thought or reasoning trace
 	Thought  *string `json:"thought,omitempty"`
@@ -41,6 +79,27 @@ type ChatResponse struct {
 		Args *map[string]interface{} `json:"args,omitempty"`
 		Name *string                 `json:"name,omitempty"`
 	} `json:"tool_call,omitempty"`
+}
+
+// ConnectionTestResult defines model for ConnectionTestResult.
+type ConnectionTestResult struct {
+	Message  *string                     `json:"message,omitempty"`
+	Mode     *string                     `json:"mode,omitempty"`
+	Model    *string                     `json:"model,omitempty"`
+	Provider *string                     `json:"provider,omitempty"`
+	Status   *ConnectionTestResultStatus `json:"status,omitempty"`
+	Url      *string                     `json:"url,omitempty"`
+}
+
+// ConnectionTestResultStatus defines model for ConnectionTestResult.Status.
+type ConnectionTestResultStatus string
+
+// Conversation defines model for Conversation.
+type Conversation struct {
+	CreatedAt *time.Time `json:"created_at,omitempty"`
+	Id        *string    `json:"id,omitempty"`
+	Title     *string    `json:"title,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 
 // Error defines model for Error.
@@ -71,6 +130,39 @@ type JobResponse struct {
 	Status *string `json:"status,omitempty"`
 }
 
+// Message defines model for Message.
+type Message struct {
+	Content        *string      `json:"content,omitempty"`
+	ConversationId *string      `json:"conversation_id,omitempty"`
+	CreatedAt      *time.Time   `json:"created_at,omitempty"`
+	Id             *string      `json:"id,omitempty"`
+	Role           *MessageRole `json:"role,omitempty"`
+	Steps          *[]ReActStep `json:"steps,omitempty"`
+	Thought        *string      `json:"thought,omitempty"`
+	ToolCall       *struct {
+		Args *map[string]interface{} `json:"args,omitempty"`
+		Name *string                 `json:"name,omitempty"`
+	} `json:"tool_call,omitempty"`
+}
+
+// MessageRole defines model for Message.Role.
+type MessageRole string
+
+// ProviderConfig defines model for ProviderConfig.
+type ProviderConfig struct {
+	// ApiKey Masked on read (****xxxx), plaintext on write. Empty string keeps existing.
+	ApiKey       *string `json:"api_key,omitempty"`
+	DefaultModel *string `json:"default_model,omitempty"`
+	LocalUrl     *string `json:"local_url,omitempty"`
+
+	// Mode 'local' for Ollama/ComfyUI, 'remote' for OpenAI-compatible API
+	Mode      *ProviderConfigMode `json:"mode,omitempty"`
+	RemoteUrl *string             `json:"remote_url,omitempty"`
+}
+
+// ProviderConfigMode 'local' for Ollama/ComfyUI, 'remote' for OpenAI-compatible API
+type ProviderConfigMode string
+
 // ReActStep defines model for ReActStep.
 type ReActStep struct {
 	Action        *string                 `json:"action,omitempty"`
@@ -87,17 +179,70 @@ type Resources struct {
 	MemoryMb *int     `json:"memory_mb,omitempty"`
 }
 
+// CreateConversationJSONBody defines parameters for CreateConversation.
+type CreateConversationJSONBody struct {
+	Title *string `json:"title,omitempty"`
+}
+
+// UpdateConversationJSONBody defines parameters for UpdateConversation.
+type UpdateConversationJSONBody struct {
+	Title *string `json:"title,omitempty"`
+}
+
+// ListMessagesParams defines parameters for ListMessages.
+type ListMessagesParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// TestConnectionJSONBody defines parameters for TestConnection.
+type TestConnectionJSONBody struct {
+	Provider TestConnectionJSONBodyProvider `json:"provider"`
+}
+
+// TestConnectionJSONBodyProvider defines parameters for TestConnection.
+type TestConnectionJSONBodyProvider string
+
 // AgentChatJSONRequestBody defines body for AgentChat for application/json ContentType.
 type AgentChatJSONRequestBody = ChatRequest
 
+// CreateConversationJSONRequestBody defines body for CreateConversation for application/json ContentType.
+type CreateConversationJSONRequestBody CreateConversationJSONBody
+
+// UpdateConversationJSONRequestBody defines body for UpdateConversation for application/json ContentType.
+type UpdateConversationJSONRequestBody UpdateConversationJSONBody
+
 // SubmitJobJSONRequestBody defines body for SubmitJob for application/json ContentType.
 type SubmitJobJSONRequestBody = JobRequest
+
+// UpdateSettingsJSONRequestBody defines body for UpdateSettings for application/json ContentType.
+type UpdateSettingsJSONRequestBody = AppConfig
+
+// TestConnectionJSONRequestBody defines body for TestConnection for application/json ContentType.
+type TestConnectionJSONRequestBody TestConnectionJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Chat with the Agent
 	// (POST /v1/agent/chat)
 	AgentChat(w http.ResponseWriter, r *http.Request)
+	// List all conversations
+	// (GET /v1/conversations)
+	ListConversations(w http.ResponseWriter, r *http.Request)
+	// Create a new conversation
+	// (POST /v1/conversations)
+	CreateConversation(w http.ResponseWriter, r *http.Request)
+	// Delete a conversation
+	// (DELETE /v1/conversations/{id})
+	DeleteConversation(w http.ResponseWriter, r *http.Request, id string)
+	// Get conversation details
+	// (GET /v1/conversations/{id})
+	GetConversation(w http.ResponseWriter, r *http.Request, id string)
+	// Update conversation (e.g. title)
+	// (PATCH /v1/conversations/{id})
+	UpdateConversation(w http.ResponseWriter, r *http.Request, id string)
+	// List messages in a conversation
+	// (GET /v1/conversations/{id}/messages)
+	ListMessages(w http.ResponseWriter, r *http.Request, id string, params ListMessagesParams)
 	// List all jobs
 	// (GET /v1/jobs)
 	ListJobs(w http.ResponseWriter, r *http.Request)
@@ -113,6 +258,15 @@ type ServerInterface interface {
 	// Stream job logs and status updates (SSE)
 	// (GET /v1/jobs/{id}/stream)
 	StreamJob(w http.ResponseWriter, r *http.Request, id string)
+	// Get current settings (secrets masked)
+	// (GET /v1/settings)
+	GetSettings(w http.ResponseWriter, r *http.Request)
+	// Update settings (encrypts secrets at rest)
+	// (PUT /v1/settings)
+	UpdateSettings(w http.ResponseWriter, r *http.Request)
+	// Test provider connection
+	// (POST /v1/settings/test)
+	TestConnection(w http.ResponseWriter, r *http.Request)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -129,6 +283,145 @@ func (siw *ServerInterfaceWrapper) AgentChat(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AgentChat(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListConversations operation middleware
+func (siw *ServerInterfaceWrapper) ListConversations(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListConversations(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateConversation operation middleware
+func (siw *ServerInterfaceWrapper) CreateConversation(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateConversation(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteConversation operation middleware
+func (siw *ServerInterfaceWrapper) DeleteConversation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteConversation(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetConversation operation middleware
+func (siw *ServerInterfaceWrapper) GetConversation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetConversation(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateConversation operation middleware
+func (siw *ServerInterfaceWrapper) UpdateConversation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateConversation(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMessages operation middleware
+func (siw *ServerInterfaceWrapper) ListMessages(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListMessagesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMessages(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -241,6 +534,48 @@ func (siw *ServerInterfaceWrapper) StreamJob(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StreamJob(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateSettings operation middleware
+func (siw *ServerInterfaceWrapper) UpdateSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestConnection operation middleware
+func (siw *ServerInterfaceWrapper) TestConnection(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestConnection(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -371,11 +706,20 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc("POST "+options.BaseURL+"/v1/agent/chat", wrapper.AgentChat)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/conversations", wrapper.ListConversations)
+	m.HandleFunc("POST "+options.BaseURL+"/v1/conversations", wrapper.CreateConversation)
+	m.HandleFunc("DELETE "+options.BaseURL+"/v1/conversations/{id}", wrapper.DeleteConversation)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/conversations/{id}", wrapper.GetConversation)
+	m.HandleFunc("PATCH "+options.BaseURL+"/v1/conversations/{id}", wrapper.UpdateConversation)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/conversations/{id}/messages", wrapper.ListMessages)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs", wrapper.ListJobs)
 	m.HandleFunc("POST "+options.BaseURL+"/v1/jobs", wrapper.SubmitJob)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs/{id}", wrapper.GetJob)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs/{id}/files/{filename}", wrapper.ServeJobFile)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs/{id}/stream", wrapper.StreamJob)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/settings", wrapper.GetSettings)
+	m.HandleFunc("PUT "+options.BaseURL+"/v1/settings", wrapper.UpdateSettings)
+	m.HandleFunc("POST "+options.BaseURL+"/v1/settings/test", wrapper.TestConnection)
 
 	return m
 }
@@ -402,6 +746,125 @@ type AgentChat500JSONResponse Error
 func (response AgentChat500JSONResponse) VisitAgentChatResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListConversationsRequestObject struct {
+}
+
+type ListConversationsResponseObject interface {
+	VisitListConversationsResponse(w http.ResponseWriter) error
+}
+
+type ListConversations200JSONResponse []Conversation
+
+func (response ListConversations200JSONResponse) VisitListConversationsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateConversationRequestObject struct {
+	Body *CreateConversationJSONRequestBody
+}
+
+type CreateConversationResponseObject interface {
+	VisitCreateConversationResponse(w http.ResponseWriter) error
+}
+
+type CreateConversation201JSONResponse Conversation
+
+func (response CreateConversation201JSONResponse) VisitCreateConversationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteConversationRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteConversationResponseObject interface {
+	VisitDeleteConversationResponse(w http.ResponseWriter) error
+}
+
+type DeleteConversation204Response struct {
+}
+
+func (response DeleteConversation204Response) VisitDeleteConversationResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteConversation404Response struct {
+}
+
+func (response DeleteConversation404Response) VisitDeleteConversationResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
+	return nil
+}
+
+type GetConversationRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetConversationResponseObject interface {
+	VisitGetConversationResponse(w http.ResponseWriter) error
+}
+
+type GetConversation200JSONResponse Conversation
+
+func (response GetConversation200JSONResponse) VisitGetConversationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetConversation404JSONResponse Error
+
+func (response GetConversation404JSONResponse) VisitGetConversationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateConversationRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateConversationJSONRequestBody
+}
+
+type UpdateConversationResponseObject interface {
+	VisitUpdateConversationResponse(w http.ResponseWriter) error
+}
+
+type UpdateConversation200JSONResponse Conversation
+
+func (response UpdateConversation200JSONResponse) VisitUpdateConversationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListMessagesRequestObject struct {
+	Id     string `json:"id"`
+	Params ListMessagesParams
+}
+
+type ListMessagesResponseObject interface {
+	VisitListMessagesResponse(w http.ResponseWriter) error
+}
+
+type ListMessages200JSONResponse []Message
+
+func (response ListMessages200JSONResponse) VisitListMessagesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -571,11 +1034,88 @@ func (response StreamJob404Response) VisitStreamJobResponse(w http.ResponseWrite
 	return nil
 }
 
+type GetSettingsRequestObject struct {
+}
+
+type GetSettingsResponseObject interface {
+	VisitGetSettingsResponse(w http.ResponseWriter) error
+}
+
+type GetSettings200JSONResponse AppConfig
+
+func (response GetSettings200JSONResponse) VisitGetSettingsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateSettingsRequestObject struct {
+	Body *UpdateSettingsJSONRequestBody
+}
+
+type UpdateSettingsResponseObject interface {
+	VisitUpdateSettingsResponse(w http.ResponseWriter) error
+}
+
+type UpdateSettings200JSONResponse AppConfig
+
+func (response UpdateSettings200JSONResponse) VisitUpdateSettingsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateSettings400JSONResponse Error
+
+func (response UpdateSettings400JSONResponse) VisitUpdateSettingsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TestConnectionRequestObject struct {
+	Body *TestConnectionJSONRequestBody
+}
+
+type TestConnectionResponseObject interface {
+	VisitTestConnectionResponse(w http.ResponseWriter) error
+}
+
+type TestConnection200JSONResponse ConnectionTestResult
+
+func (response TestConnection200JSONResponse) VisitTestConnectionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Chat with the Agent
 	// (POST /v1/agent/chat)
 	AgentChat(ctx context.Context, request AgentChatRequestObject) (AgentChatResponseObject, error)
+	// List all conversations
+	// (GET /v1/conversations)
+	ListConversations(ctx context.Context, request ListConversationsRequestObject) (ListConversationsResponseObject, error)
+	// Create a new conversation
+	// (POST /v1/conversations)
+	CreateConversation(ctx context.Context, request CreateConversationRequestObject) (CreateConversationResponseObject, error)
+	// Delete a conversation
+	// (DELETE /v1/conversations/{id})
+	DeleteConversation(ctx context.Context, request DeleteConversationRequestObject) (DeleteConversationResponseObject, error)
+	// Get conversation details
+	// (GET /v1/conversations/{id})
+	GetConversation(ctx context.Context, request GetConversationRequestObject) (GetConversationResponseObject, error)
+	// Update conversation (e.g. title)
+	// (PATCH /v1/conversations/{id})
+	UpdateConversation(ctx context.Context, request UpdateConversationRequestObject) (UpdateConversationResponseObject, error)
+	// List messages in a conversation
+	// (GET /v1/conversations/{id}/messages)
+	ListMessages(ctx context.Context, request ListMessagesRequestObject) (ListMessagesResponseObject, error)
 	// List all jobs
 	// (GET /v1/jobs)
 	ListJobs(ctx context.Context, request ListJobsRequestObject) (ListJobsResponseObject, error)
@@ -591,6 +1131,15 @@ type StrictServerInterface interface {
 	// Stream job logs and status updates (SSE)
 	// (GET /v1/jobs/{id}/stream)
 	StreamJob(ctx context.Context, request StreamJobRequestObject) (StreamJobResponseObject, error)
+	// Get current settings (secrets masked)
+	// (GET /v1/settings)
+	GetSettings(ctx context.Context, request GetSettingsRequestObject) (GetSettingsResponseObject, error)
+	// Update settings (encrypts secrets at rest)
+	// (PUT /v1/settings)
+	UpdateSettings(ctx context.Context, request UpdateSettingsRequestObject) (UpdateSettingsResponseObject, error)
+	// Test provider connection
+	// (POST /v1/settings/test)
+	TestConnection(ctx context.Context, request TestConnectionRequestObject) (TestConnectionResponseObject, error)
 }
 
 type StrictHandlerFunc = strictnethttp.StrictHTTPHandlerFunc
@@ -646,6 +1195,173 @@ func (sh *strictHandler) AgentChat(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(AgentChatResponseObject); ok {
 		if err := validResponse.VisitAgentChatResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListConversations operation middleware
+func (sh *strictHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
+	var request ListConversationsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListConversations(ctx, request.(ListConversationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListConversations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListConversationsResponseObject); ok {
+		if err := validResponse.VisitListConversationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateConversation operation middleware
+func (sh *strictHandler) CreateConversation(w http.ResponseWriter, r *http.Request) {
+	var request CreateConversationRequestObject
+
+	var body CreateConversationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateConversation(ctx, request.(CreateConversationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateConversation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateConversationResponseObject); ok {
+		if err := validResponse.VisitCreateConversationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteConversation operation middleware
+func (sh *strictHandler) DeleteConversation(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteConversationRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteConversation(ctx, request.(DeleteConversationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteConversation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteConversationResponseObject); ok {
+		if err := validResponse.VisitDeleteConversationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetConversation operation middleware
+func (sh *strictHandler) GetConversation(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetConversationRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetConversation(ctx, request.(GetConversationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetConversation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetConversationResponseObject); ok {
+		if err := validResponse.VisitGetConversationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateConversation operation middleware
+func (sh *strictHandler) UpdateConversation(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateConversationRequestObject
+
+	request.Id = id
+
+	var body UpdateConversationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateConversation(ctx, request.(UpdateConversationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateConversation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateConversationResponseObject); ok {
+		if err := validResponse.VisitUpdateConversationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMessages operation middleware
+func (sh *strictHandler) ListMessages(w http.ResponseWriter, r *http.Request, id string, params ListMessagesParams) {
+	var request ListMessagesRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMessages(ctx, request.(ListMessagesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMessages")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMessagesResponseObject); ok {
+		if err := validResponse.VisitListMessagesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -787,29 +1503,128 @@ func (sh *strictHandler) StreamJob(w http.ResponseWriter, r *http.Request, id st
 	}
 }
 
+// GetSettings operation middleware
+func (sh *strictHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
+	var request GetSettingsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSettings(ctx, request.(GetSettingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSettings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSettingsResponseObject); ok {
+		if err := validResponse.VisitGetSettingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateSettings operation middleware
+func (sh *strictHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
+	var request UpdateSettingsRequestObject
+
+	var body UpdateSettingsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateSettings(ctx, request.(UpdateSettingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateSettings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateSettingsResponseObject); ok {
+		if err := validResponse.VisitUpdateSettingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TestConnection operation middleware
+func (sh *strictHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
+	var request TestConnectionRequestObject
+
+	var body TestConnectionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TestConnection(ctx, request.(TestConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TestConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TestConnectionResponseObject); ok {
+		if err := validResponse.VisitTestConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"H4sIAAAAAAAC/8xX247bNhN+FYL/DyQBtLa3SW98t03S1NsiDdYNchEvDFoaW9zyFHLkjWH43Ysh5aOk",
-	"xm12i72yLI44M9+BhzXPrXbWgMHAh2se8hK0iI+vS4E38KWCgPTXeevAo4Q4qCEEsQB6hK9COwV8yG8q",
-	"wwRzKyytYSH30iHDUiBzXhoMrASlLM84rhyFB/TSLPgm49oWoI7nUkpo8bIZvMm4hy+V9FDw4eddHbe7",
-	"QDu7gxxp1tRAcNYEaHbgD0YaBQUEF6Mkgo4P//cw50P+v/4er34NVv8GrnIcIzj6tJ5LeC9W8X9pq0UZ",
-	"ISwggSKt4UMqTxpm56yOYNYzDyJYI82CoRc5tGGF1qppLpRqtiT8Ihy0s0fCCN3W56YB2qYFxrfeW99M",
-	"BtvX35w049d21pwg9yAQiqmI2Myt1/TEC4FwgVK3Nt+VNOOyaH3tIVQKOzgWWIXzO+j0Qm61FqY40u9n",
-	"nmzAM36R84xHBzx/9gs5gH2yXhXPXpBod/pq8nyiIzDLyHFRSBKQUB+Oiuj6ft+C1A3DphqHL3uXg4ug",
-	"pG6D3EOwlc/hDBdsA09NmjJnO6BuuwDu8moHuf+Iwb1Jm77JkyVbUqShqTSuwm740VfQknIujVBTYcI9",
-	"dIg2TDtiZtYqEIaC7CyAX4rOEg8WmLNgOKDzRMeuOpjEVHoGPq7OoK1fTfXsYFQahAUNt6wh1JiZ2+aK",
-	"d/VhxObWMyyBiUrB72P2K3gDKmNCKXtP616oZloi0uOdnQUmTMECehCaXim7CD1SqcQo4KNZ2NWHEc/4",
-	"EnxI+Qa9y94gQujACCf5kL/sDXq0qziBZWy6v7zsiwUY7OdlWomcTSYnaCLqo4JqpxjaUXjSNgT8yRar",
-	"5H+DYJI8nFMyj1/170IiLPnjW+453G03xwYidSUjRnvEsn8YDB44de29mPuENmqd7SMy/uMDZk/bS0va",
-	"kUHwRihG8gfPoA7MeKi0Fn6V9lBk9xLLqKlYaIwgVkk+lHwBLXT+JgNeU8B34nrW+YC2v8aK3myYaqLz",
-	"QCz8KaEcCxNK7Sprt8g4WpeafRyLHOzBZznk8mEzdxvk2s5YfZphocpzCGFeKRW37Vf/DYlLoWRB/LDg",
-	"IJfzOsGTklHSBxPMwD0jzJ5fffr44siv/bUsNp2mfQe1upzwQgOCD3z4ed3CxugNp02IjjgCS749AdNB",
-	"4lQ32UHrp/vn7SOuunFRaNfSG0AhVUjyefX45FFOY5HNbWWKE9LeAbIqgI/aKraFnVLWn0sFob+mH4K6",
-	"m8Mx6ePazn6WCppMfj9lWesk27oekX2bI+BFOqocc7K72sykIVCbd9oGI3+UwKhmtk22l8JxIMF4yN3O",
-	"7v/CnjTERMpbSA85qhWbe6vj5kr831v/Z3B0MW0qYN95O+9x+KnZF+Er9mEJpp25/U0pxgxZunFMTCFQ",
-	"DNl6Ul9BJnzIJvzm4/v3o/fvJnwzMRNTf6Hs4iBcSQMp+LXVTippFr1eL35xjize0pz1cbhTEn/n5sRC",
-	"5JKO0vXpmlpglaObd2DPx+O3tChvNn8FAAD//zzaJpUcEgAA",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

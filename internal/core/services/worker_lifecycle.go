@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,7 +21,10 @@ import (
 
 const (
 	CapabilityImageGenerate = "image.generate"
+	CapabilityTextGenerate  = "text.generate"
 )
+
+type capabilityJobHandler func(context.Context, domain.Job)
 
 type WorkerLifecycle struct {
 	logger    *slog.Logger
@@ -28,8 +33,12 @@ type WorkerLifecycle struct {
 	repo      ports.Repository
 	workspace *WorkspaceManager
 	eventBus  *EventBus
+	llm       domain.LLMProvider
 	image     domain.ImageProvider
 	publicURL string
+
+	handlerMu          sync.RWMutex
+	capabilityHandlers map[string]capabilityJobHandler
 }
 
 func NewWorkerLifecycle(
@@ -39,6 +48,7 @@ func NewWorkerLifecycle(
 	repo ports.Repository,
 	ws *WorkspaceManager,
 	eventBus *EventBus,
+	llmProvider domain.LLMProvider,
 	imageProvider domain.ImageProvider,
 ) *WorkerLifecycle {
 	publicBaseURL := os.Getenv("AULE_PUBLIC_BASE_URL")
@@ -46,16 +56,58 @@ func NewWorkerLifecycle(
 		publicBaseURL = "http://localhost:8080"
 	}
 
-	return &WorkerLifecycle{
-		logger:    logger,
-		scheduler: scheduler,
-		workerMgr: mgr,
-		repo:      repo,
-		workspace: ws,
-		eventBus:  eventBus,
-		image:     imageProvider,
-		publicURL: strings.TrimRight(publicBaseURL, "/"),
+	lifecycle := &WorkerLifecycle{
+		logger:             logger,
+		scheduler:          scheduler,
+		workerMgr:          mgr,
+		repo:               repo,
+		workspace:          ws,
+		eventBus:           eventBus,
+		llm:                llmProvider,
+		image:              imageProvider,
+		publicURL:          strings.TrimRight(publicBaseURL, "/"),
+		capabilityHandlers: map[string]capabilityJobHandler{},
 	}
+
+	lifecycle.RegisterCapabilityHandler(CapabilityImageGenerate, lifecycle.executeImageJob)
+	lifecycle.RegisterCapabilityHandler(CapabilityTextGenerate, lifecycle.executeTextJob)
+
+	return lifecycle
+}
+
+// RegisterCapabilityHandler registers a capability execution handler.
+func (s *WorkerLifecycle) RegisterCapabilityHandler(capability string, handler capabilityJobHandler) {
+	capability = strings.TrimSpace(capability)
+	if capability == "" || handler == nil {
+		return
+	}
+
+	s.handlerMu.Lock()
+	defer s.handlerMu.Unlock()
+	s.capabilityHandlers[capability] = handler
+}
+
+func (s *WorkerLifecycle) dispatchCapabilityJob(ctx context.Context, job domain.Job) bool {
+	if job.Metadata == nil {
+		return false
+	}
+
+	capability := strings.TrimSpace(job.Metadata["capability"])
+	if capability == "" {
+		return false
+	}
+
+	s.handlerMu.RLock()
+	handler, ok := s.capabilityHandlers[capability]
+	s.handlerMu.RUnlock()
+
+	if !ok {
+		s.failJob(ctx, job, fmt.Errorf("unsupported capability: %s", capability))
+		return true
+	}
+
+	handler(ctx, job)
+	return true
 }
 
 // Run starts the scheduler loop
@@ -65,10 +117,25 @@ func (s *WorkerLifecycle) Run(ctx context.Context) error {
 }
 
 func (s *WorkerLifecycle) publishStatus(jobID string, status string) {
+	s.publishStatusWithProgress(jobID, status, nil)
+}
+
+func (s *WorkerLifecycle) publishStatusWithProgress(jobID string, status string, progress *int) {
+	payload := map[string]interface{}{
+		"status": status,
+	}
+	if progress != nil {
+		payload["progress"] = *progress
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		payloadBytes = []byte(fmt.Sprintf(`{"status": "%s"}`, status))
+	}
+
 	s.eventBus.Publish(Event{
 		JobID:     jobID,
 		Type:      EventTypeStatus,
-		Data:      fmt.Sprintf(`{"status": "%s"}`, status),
+		Data:      string(payloadBytes),
 		Timestamp: time.Now().Unix(),
 	})
 }
@@ -86,13 +153,13 @@ func (s *WorkerLifecycle) publishLog(jobID string, data string) {
 func (s *WorkerLifecycle) executeJob(ctx context.Context, job domain.Job) {
 	s.logger.Info("executing job", "job_id", job.ID)
 
-	if job.Metadata != nil && job.Metadata["capability"] == CapabilityImageGenerate {
-		s.executeImageJob(ctx, job)
+	if s.dispatchCapabilityJob(ctx, job) {
 		return
 	}
 
 	// Publish RUNNING
-	s.publishStatus(string(job.ID), string(domain.JobStatusRunning))
+	progressStart := 10
+	s.publishStatusWithProgress(string(job.ID), string(domain.JobStatusRunning), &progressStart)
 
 	// 1. Create Workspace
 	wsPath, err := s.workspace.PrepareWorkspace(string(job.ID))
@@ -150,7 +217,8 @@ func (s *WorkerLifecycle) executeJob(ctx context.Context, job domain.Job) {
 				_ = s.workerMgr.Kill(ctx, workerID) // Ensure it's gone
 
 				job.Status = domain.JobStatusCompleted
-				s.publishStatus(string(job.ID), string(domain.JobStatusCompleted))
+				progressDone := 100
+				s.publishStatusWithProgress(string(job.ID), string(domain.JobStatusCompleted), &progressDone)
 				if err := s.repo.SaveJob(ctx, job); err != nil {
 					s.logger.Error("failed to save job status", "error", err)
 				}
@@ -175,7 +243,8 @@ func (s *WorkerLifecycle) executeImageJob(ctx context.Context, job domain.Job) {
 		return
 	}
 
-	s.publishStatus(string(job.ID), string(domain.JobStatusRunning))
+	progressStart := 20
+	s.publishStatusWithProgress(string(job.ID), string(domain.JobStatusRunning), &progressStart)
 	s.publishLog(string(job.ID), "image generation started")
 
 	workspacePath, err := s.workspace.PrepareWorkspace(string(job.ID))
@@ -195,6 +264,8 @@ func (s *WorkerLifecycle) executeImageJob(ctx context.Context, job domain.Job) {
 		s.failJob(ctx, job, fmt.Errorf("image generation failed: %w", err))
 		return
 	}
+	progressGenerated := 60
+	s.publishStatusWithProgress(string(job.ID), string(domain.JobStatusRunning), &progressGenerated)
 
 	imageURLRegex := regexp.MustCompile(`https?://[^\s\)]+`)
 	resolvedURL := rawImageURL
@@ -220,8 +291,14 @@ func (s *WorkerLifecycle) executeImageJob(ctx context.Context, job domain.Job) {
 		s.failJob(ctx, job, fmt.Errorf("image download failed status=%d body=%s", resp.StatusCode, string(body)))
 		return
 	}
+	progressDownloaded := 80
+	s.publishStatusWithProgress(string(job.ID), string(domain.JobStatusRunning), &progressDownloaded)
 
-	resultFileName := "result.png"
+	attempt := "1"
+	if job.Metadata != nil && strings.TrimSpace(job.Metadata["attempt"]) != "" {
+		attempt = strings.TrimSpace(job.Metadata["attempt"])
+	}
+	resultFileName := fmt.Sprintf("result-v%s.png", attempt)
 	resultPath := filepath.Join(workspacePath, resultFileName)
 	file, err := os.Create(resultPath)
 	if err != nil {
@@ -244,8 +321,73 @@ func (s *WorkerLifecycle) executeImageJob(ctx context.Context, job domain.Job) {
 		s.logger.Error("failed to save completed image job", "job_id", job.ID, "error", err)
 	}
 
-	s.publishStatus(string(job.ID), string(domain.JobStatusCompleted))
+	progressDone := 100
+	s.publishStatusWithProgress(string(job.ID), string(domain.JobStatusCompleted), &progressDone)
 	s.publishLog(string(job.ID), fmt.Sprintf("image saved: %s", resultPath))
+}
+
+func (s *WorkerLifecycle) executeTextJob(ctx context.Context, job domain.Job) {
+	if s.llm == nil {
+		s.failJob(ctx, job, fmt.Errorf("llm provider not configured"))
+		return
+	}
+
+	prompt := ""
+	if job.Metadata != nil {
+		prompt = job.Metadata["prompt"]
+	}
+	if strings.TrimSpace(prompt) == "" {
+		s.failJob(ctx, job, fmt.Errorf("missing prompt metadata for text job"))
+		return
+	}
+
+	progressStart := 20
+	s.publishStatusWithProgress(string(job.ID), string(domain.JobStatusRunning), &progressStart)
+	s.publishLog(string(job.ID), "text generation started")
+
+	workspacePath, err := s.workspace.PrepareWorkspace(string(job.ID))
+	if err != nil {
+		s.failJob(ctx, job, fmt.Errorf("workspace prep failed: %w", err))
+		return
+	}
+
+	job.Status = domain.JobStatusRunning
+	job.UpdatedAt = time.Now()
+	if err := s.repo.SaveJob(ctx, job); err != nil {
+		s.logger.Error("failed to save text job running state", "job_id", job.ID, "error", err)
+	}
+
+	resultText, err := s.llm.GenerateText(ctx, prompt)
+	if err != nil {
+		s.failJob(ctx, job, fmt.Errorf("text generation failed: %w", err))
+		return
+	}
+	progressGenerated := 70
+	s.publishStatusWithProgress(string(job.ID), string(domain.JobStatusRunning), &progressGenerated)
+
+	attempt := "1"
+	if job.Metadata != nil && strings.TrimSpace(job.Metadata["attempt"]) != "" {
+		attempt = strings.TrimSpace(job.Metadata["attempt"])
+	}
+	resultFileName := fmt.Sprintf("result-v%s.txt", attempt)
+	resultPath := filepath.Join(workspacePath, resultFileName)
+	if err := os.WriteFile(resultPath, []byte(resultText), 0644); err != nil {
+		s.failJob(ctx, job, fmt.Errorf("failed writing result file: %w", err))
+		return
+	}
+
+	servedURL := fmt.Sprintf("%s/v1/jobs/%s/files/%s", s.publicURL, job.ID, resultFileName)
+	job.Status = domain.JobStatusCompleted
+	job.Result = &servedURL
+	job.Error = nil
+	job.UpdatedAt = time.Now()
+	if err := s.repo.SaveJob(ctx, job); err != nil {
+		s.logger.Error("failed to save completed text job", "job_id", job.ID, "error", err)
+	}
+
+	progressDone := 100
+	s.publishStatusWithProgress(string(job.ID), string(domain.JobStatusCompleted), &progressDone)
+	s.publishLog(string(job.ID), fmt.Sprintf("text saved: %s", resultPath))
 }
 
 func (s *WorkerLifecycle) failJob(ctx context.Context, job domain.Job, err error) {
@@ -254,7 +396,7 @@ func (s *WorkerLifecycle) failJob(ctx context.Context, job domain.Job, err error
 	msg := err.Error()
 	job.Error = &msg
 	job.UpdatedAt = time.Now()
-	s.publishStatus(string(job.ID), string(domain.JobStatusFailed))
+	s.publishStatusWithProgress(string(job.ID), string(domain.JobStatusFailed), nil)
 	s.publishLog(string(job.ID), msg)
 	if err := s.repo.SaveJob(ctx, job); err != nil {
 		s.logger.Error("failed to save job status", "error", err)
@@ -302,6 +444,7 @@ func (s *WorkerLifecycle) SubmitImageJob(ctx context.Context, prompt string) (do
 			"capability": CapabilityImageGenerate,
 			"tool":       "generate_image",
 			"prompt":     prompt,
+			"attempt":    "1",
 		},
 	}
 
@@ -311,6 +454,43 @@ func (s *WorkerLifecycle) SubmitImageJob(ctx context.Context, prompt string) (do
 
 	s.publishStatus(string(id), string(domain.JobStatusPending))
 	s.publishLog(string(id), "image job queued")
+
+	if err := s.scheduler.SubmitJob(ctx, job); err != nil {
+		return "", err
+	}
+
+	return id, nil
+}
+
+// SubmitTextJob creates a queued text generation job and delegates execution to scheduler/lifecycle.
+func (s *WorkerLifecycle) SubmitTextJob(ctx context.Context, prompt string) (domain.JobID, error) {
+	id := domain.JobID(uuid.New().String())
+	now := time.Now()
+
+	job := domain.Job{
+		ID: id,
+		Spec: domain.WorkerSpec{
+			Image:   "llm",
+			Command: []string{"generate_text"},
+			Env:     map[string]string{},
+		},
+		Status:    domain.JobStatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Metadata: map[string]string{
+			"capability": CapabilityTextGenerate,
+			"tool":       "generate_text",
+			"prompt":     prompt,
+			"attempt":    "1",
+		},
+	}
+
+	if err := s.repo.SaveJob(ctx, job); err != nil {
+		return "", fmt.Errorf("failed to save text job: %w", err)
+	}
+
+	s.publishStatus(string(id), string(domain.JobStatusPending))
+	s.publishLog(string(id), "text job queued")
 
 	if err := s.scheduler.SubmitJob(ctx, job); err != nil {
 		return "", err
@@ -359,4 +539,19 @@ func (wl *WorkerLifecycle) GetWorkerIP(ctx context.Context, jobID domain.JobID) 
 	}
 
 	return wl.workerMgr.GetWorkerIP(ctx, *job.WorkerID)
+}
+
+// UpdateProviders hot-swaps the LLM and Image providers.
+// Called when settings change to apply new configuration without restart.
+func (wl *WorkerLifecycle) UpdateProviders(llm domain.LLMProvider, img domain.ImageProvider) {
+	wl.handlerMu.Lock()
+	defer wl.handlerMu.Unlock()
+	wl.llm = llm
+	wl.image = img
+	wl.logger.Info("providers hot-reloaded")
+}
+
+// TestLLM sends a minimal request to verify LLM connectivity.
+func (wl *WorkerLifecycle) TestLLM(ctx context.Context) (string, error) {
+	return wl.llm.GenerateText(ctx, "Reply with exactly: ok")
 }

@@ -7,7 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 
+	"github.com/manthysbr/auleOS/internal/config"
 	"github.com/manthysbr/auleOS/internal/core/domain"
 	"github.com/manthysbr/auleOS/internal/core/services"
 )
@@ -18,6 +20,8 @@ type Server struct {
 	reactAgent   *services.ReActAgentService
 	agentService *services.AgentService
 	eventBus     *services.EventBus
+	settings     *config.SettingsStore
+	convStore    *services.ConversationStore
 	workerMgr    interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	}
@@ -36,6 +40,8 @@ func NewServer(
 	reactAgent *services.ReActAgentService,
 	agentService *services.AgentService,
 	eventBus *services.EventBus,
+	settings *config.SettingsStore,
+	convStore *services.ConversationStore,
 	workerMgr interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	},
@@ -49,15 +55,23 @@ func NewServer(
 		reactAgent:   reactAgent,
 		agentService: agentService,
 		eventBus:     eventBus,
+		settings:     settings,
+		convStore:    convStore,
 		workerMgr:    workerMgr,
 		repo:         repo,
 	}
 }
 
-// Handler returns the http.Handler for the server
+// Handler returns the http.Handler for the server.
+// Mounts generated API routes + custom settings routes on a shared mux.
 func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+
+	// Mount generated OpenAPI routes (includes conversations, settings, jobs, agent chat)
 	strictHandler := NewStrictHandler(s, nil)
-	return Handler(strictHandler)
+	HandlerFromMux(strictHandler, mux)
+
+	return mux
 }
 
 // SubmitJob implements StrictServerInterface
@@ -238,18 +252,24 @@ func (s *Server) AgentChat(ctx context.Context, request AgentChatRequestObject) 
 		model = *request.Body.Model
 	}
 
+	var convID domain.ConversationID
+	if request.Body.ConversationId != nil {
+		convID = domain.ConversationID(*request.Body.ConversationId)
+	}
+
 	var (
-		thought  string
-		response string
-		steps    *[]ReActStep
-		toolCall *struct {
+		thought        string
+		response       string
+		conversationID string
+		steps          *[]ReActStep
+		toolCall       *struct {
 			Args *map[string]interface{} `json:"args,omitempty"`
 			Name *string                 `json:"name,omitempty"`
 		}
 	)
 
 	if s.reactAgent != nil {
-		reactResp, err := s.reactAgent.Chat(ctx, msg)
+		reactResp, retConvID, err := s.reactAgent.Chat(ctx, convID, msg)
 		if err != nil {
 			s.logger.Error("react agent chat failed", "error", err)
 			errMsg := err.Error()
@@ -258,6 +278,7 @@ func (s *Server) AgentChat(ctx context.Context, request AgentChatRequestObject) 
 
 		response = reactResp.Response
 		thought = reactResp.Thought
+		conversationID = string(retConvID)
 
 		apiSteps := make([]ReActStep, 0, len(reactResp.Steps))
 		for _, step := range reactResp.Steps {
@@ -338,23 +359,14 @@ func (s *Server) AgentChat(ctx context.Context, request AgentChatRequestObject) 
 	}
 
 	chatResponse := AgentChat200JSONResponse{
-		Response: &response,
-		Steps:    steps,
-		Thought:  &thought,
-		ToolCall: toolCall,
+		Response:       &response,
+		Steps:          steps,
+		Thought:        &thought,
+		ToolCall:       toolCall,
+		ConversationId: &conversationID,
 	}
 
 	return chatResponse, nil
-}
-
-// ServeJobFileResponse implements the response interface for serving files
-type ServeJobFileResponse struct {
-	FilePath string
-}
-
-func (r ServeJobFileResponse) VisitServeJobFileResponse(w http.ResponseWriter) error {
-	http.ServeFile(w, nil, r.FilePath)
-	return nil
 }
 
 // ServeJobFile implements StrictServerInterface
@@ -362,9 +374,23 @@ func (s *Server) ServeJobFile(ctx context.Context, request ServeJobFileRequestOb
 	path, err := s.lifecycle.GetJobFilePath(request.Id, request.Filename)
 	if err != nil {
 		s.logger.Error("failed to get job file path", "error", err)
-		// Assuming error means file not found or invalid path for now
 		return ServeJobFile404Response{}, nil
 	}
 
-	return ServeJobFileResponse{FilePath: path}, nil
+	file, err := os.Open(path)
+	if err != nil {
+		s.logger.Error("failed to open job file", "error", err)
+		return ServeJobFile404Response{}, nil
+	}
+
+	stat, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return ServeJobFile500Response{}, nil
+	}
+
+	return ServeJobFile200ApplicationoctetStreamResponse{
+		Body:          file,
+		ContentLength: stat.Size(),
+	}, nil
 }

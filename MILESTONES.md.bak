@@ -1,0 +1,275 @@
+# auleOS Milestones
+
+Última atualização: 2026-02-16
+
+Este arquivo consolida onde estamos no plano do auleOS e o que falta para fechar o ciclo de Sistema Operacional de Agentes.
+
+## Critério de status
+
+- DONE: Entregue e validado (build/teste funcional básico)
+- IN_PROGRESS: Parcialmente entregue, ainda com gaps para produção
+- TODO: Ainda não iniciado de forma estrutural
+
+## Princípios de implementação (diretriz permanente)
+
+Estas regras valem para todas as próximas milestones:
+
+1. **Go idiomático e simples primeiro**
+  - Preferir composição, interfaces pequenas e tratamento explícito de erro.
+  - Evitar abstrações prematuras e evitar “framework caseiro”.
+
+2. **Reuse-first (não reinventar roda)**
+  - Antes de criar algo manualmente, verificar se já existe implementação no código atual.
+  - Reaproveitar padrões já consolidados no projeto (scheduler, lifecycle, repo, geração de API, hooks).
+  - Olhar sempre na web se não há algo já maduro e estável para o problema (ex: event bus, job queue, etc) para copiarmos/adaptarmos.
+
+3. **Inspirar em referências sólidas externas**
+  - Quando houver dúvida de desenho, pesquisar implementações maduras (OSS) e adaptar ao contexto do auleOS.
+  - Priorizar bibliotecas e padrões estáveis em vez de soluções ad-hoc.
+
+4. **Spec-driven e contract-first sempre**
+  - Atualizar OpenAPI/schema antes de ampliar comportamento externo.
+  - Gerar código/tipos a partir do contrato, evitando tipagem “na mão”.
+
+5. **Validação contínua por fatia vertical**
+  - Entregar em ciclos back + front + contrato.
+  - Sempre fechar cada ciclo com build e smoke test.
+
+---
+
+## M1 — Fundação Agêntica (DONE)
+
+### Objetivo
+Estabelecer o núcleo de raciocínio + abstração de provedores + primeira tool.
+
+### Entregue
+- Abstração de providers LLM/Image (local/remoto)
+- Factory central de providers para esconder seleção local/API do código de aplicação
+- Estruturas ReAct no domínio
+- ToolRegistry central
+- ReActAgentService com loop Thought → Action → Observation → Final Answer
+- Tool `generate_image` registrada
+
+### Evidência técnica
+- `internal/core/services/react_agent.go`
+- `internal/core/services/tools.go`
+- `internal/adapters/providers/factory.go`
+- `internal/adapters/imagegen/openai.go`
+- `cmd/aule-kernel/main.go`
+
+### Definition of Done
+- ReAct executa com pelo menos uma tool sem quebrar o fluxo
+- Seleção de provider (local/remoto) abstraída para usuário e ponto único de configuração
+- Build backend passa
+
+---
+
+## M2 — ReAct exposto no Kernel API (DONE)
+
+### Objetivo
+Trocar o chat simplificado pelo motor ReAct no endpoint do kernel.
+
+### Entregue
+- Handler de chat usando `ReActAgentService` (com fallback legado)
+- Contrato OpenAPI com `steps`
+- Tipos Go/TS regenerados
+
+### Evidência técnica
+- `pkg/kernel/server.go`
+- `specs/kernel-api.yaml`
+- `pkg/kernel/api.gen.go`
+- `web/src/lib/api.schema.d.ts`
+
+### Definition of Done
+- `POST /v1/agent/chat` retorna `response`, `thought` e `steps`
+- Build backend/frontend passa
+
+---
+
+## M3 — UI do Pensamento ReAct (DONE)
+
+### Objetivo
+Exibir o processo do agente no frontend, não apenas resposta final.
+
+### Entregue
+- Chat renderiza passos ReAct (pensamento, ação, observação, resposta)
+- Renderização de `tool_call` com payload
+- Painel de Settings/Status no workspace com inventário de features prontas/parciais
+
+### Evidência técnica
+- `web/src/components/agent/ChatInterface.tsx`
+- `web/src/components/workspace/SettingsPanel.tsx`
+- `web/src/pages/Workspace.tsx`
+- `web/src/components/workspace/Sidebar.tsx`
+
+### Definition of Done
+- Usuário vê cadeia ReAct no chat
+- Fluxo de resposta continua funcional
+
+---
+
+## M4 — Jobs reais para imagem + workspace persistente (IN_PROGRESS)
+
+### Objetivo
+Converter geração de imagem em Job persistido com artefato local.
+
+### Entregue
+- `generate_image` cria Job no ledger
+- `generate_image` enfileira execução assíncrona no `WorkerLifecycle/JobScheduler`
+- Roteamento de execução no lifecycle por capacidade (`image.generate`) em vez de nome fixo da tool
+- Capacidade `text.generate` adicionada no mesmo pipeline assíncrono
+- Tool `generate_text` registrada com retorno de `job_id`
+- Registry de handlers por capability no lifecycle (extensível sem alterar core)
+- Transições de status: `QUEUED` → `RUNNING` → `COMPLETED`/`FAILED`
+- Persistência de arquivo em `/home/gohan/auleOS/workspace/jobs/{job_id}/result-v1.png`
+- Persistência de texto em `/home/gohan/auleOS/workspace/jobs/{job_id}/result-v1.txt`
+- URL de arquivo servida pelo kernel (`/v1/jobs/{id}/files/{filename}`)
+- Sidebar com status real (incluindo `QUEUED`)
+- Chat abre automaticamente o stream quando qualquer tool retorna `job_id`
+
+### Evidência técnica
+- `internal/core/services/tools.go`
+- `internal/core/services/worker_lifecycle.go`
+- `internal/core/services/workspace.go`
+- `internal/core/domain/job.go`
+- `web/src/pages/Workspace.tsx`
+- `web/src/components/agent/ChatInterface.tsx`
+- `web/src/components/workspace/Sidebar.tsx`
+
+### Gaps para fechar M4
+- Falta cobertura de testes focada no fluxo de persistência
+- Extrair handlers de capability para módulos dedicados + testes por handler
+
+### Exit Criteria (para virar DONE)
+- `generate_image` assíncrono por job scheduler/worker lifecycle
+- Retry/control de erro por job
+- Testes de integração cobrindo criação, status e artefato
+
+---
+
+## M5 — Streaming em tempo real do Job (IN_PROGRESS)
+
+### Objetivo
+Mostrar progressão operacional do job via SSE.
+
+### Entregue
+- Publicação de eventos `status` e `log` no fluxo de imagem
+- `AgentStream` consumindo eventos nomeados SSE
+- Parsing amigável do payload de status no frontend
+- Seleção automática do job no stream após resposta da tool
+- Progresso percentual em status SSE (`progress`) para capacidades assíncronas
+- Painel de resultado no stream (preview/download de artefato)
+
+### Evidência técnica
+- `internal/core/services/tools.go`
+- `internal/core/services/eventbus.go`
+- `web/src/hooks/useEventStream.ts`
+- `web/src/components/workspace/AgentStream.tsx`
+
+### Gaps para fechar M5
+- Falta merge entre eventos de tool e eventos do worker lifecycle padrão
+- Reconexão/resync de SSE ainda básica
+
+### Exit Criteria
+- Status e progresso consistentes para qualquer tipo de job
+- SSE resiliente a reconexão sem perder estado final
+
+---
+
+## M6 — Orquestração completa por Workers/Watchdog (TODO)
+
+### Objetivo
+Executar AWUs via workers efêmeros, mantendo kernel como plano de controle.
+
+### Escopo
+- Integrar tool requests ao `WorkerLifecycle`/`JobScheduler`
+- Watchdog como canal de progresso/resultado do worker
+- Encerrar dependência de execução pesada no processo do kernel
+
+### Exit Criteria
+- Jobs multimodais executam em worker isolado
+- Kernel só orquestra e persiste estado
+
+---
+
+## M7 — Segurança e Confiabilidade Operacional (TODO)
+
+### Objetivo
+Aplicar padrão zero-trust e robustez de produção.
+
+### Escopo
+- `--network none` por padrão em workers
+- FS read-only + exceções explícitas (workspace/tmp)
+- Zombie reaping completo na inicialização
+- Timeouts, cancelamento e política de retry por tipo de job
+
+### Exit Criteria
+- Checklist de hardening validado
+- Recuperação após restart sem inconsistência no ledger
+
+---
+
+## M8 — Observabilidade e SLOs (TODO)
+
+### Objetivo
+Transformar o auleOS em “glass box” operacional.
+
+### Escopo
+- Métricas de latência (LLM/tool/job)
+- Consumo de recursos por job (CPU/RAM/VRAM quando disponível)
+- Tracing por JobID
+- Painel de saúde básico
+
+### Exit Criteria
+- Diagnóstico de falhas por job em minutos
+- Métricas-chave visíveis em UI/log estruturado
+
+---
+
+## M9 — Qualidade, Testes e Release (TODO)
+
+### Objetivo
+Fechar ciclo de engenharia para iteração estável.
+
+### Escopo
+- Suite de integração backend (chat ReAct + job + artefatos + SSE)
+- Fluxo E2E mínimo no frontend
+- Documentação operacional (`runbook`) e critérios de release
+
+### Exit Criteria
+- Pipeline verde de testes críticos
+- Guia de operação para desenvolvimento local e debug
+
+---
+
+## Próximos 3 checkpoints recomendados
+
+1. Finalizar M4: criar testes de integração (job → status → artefato) para imagem e texto
+2. Finalizar M5: unificar stream de status/progresso entre jobs de tool e jobs de worker padrão
+3. Iniciar M6: plugar Watchdog no caminho principal de execução de jobs
+
+---
+
+## Comandos de validação rápida (estado atual)
+
+Backend:
+
+```bash
+cd /home/gohan/auleOS/auleOS
+go build ./cmd/aule-kernel
+```
+
+Frontend:
+
+```bash
+cd /home/gohan/auleOS/auleOS/web
+npm run build
+```
+
+Smoke API:
+
+```bash
+curl -s http://localhost:8080/v1/agent/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"gere uma imagem de cidade futurista","model":"llama3.2"}' | jq
+```

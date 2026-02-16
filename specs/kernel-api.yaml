@@ -157,6 +157,186 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /v1/conversations:
+    get:
+      summary: List all conversations
+      operationId: ListConversations
+      responses:
+        '200':
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Conversation'
+    post:
+      summary: Create a new conversation
+      operationId: CreateConversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  example: "New Chat"
+      responses:
+        '201':
+          description: Conversation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+
+  /v1/conversations/{id}:
+    get:
+      summary: Get conversation details
+      operationId: GetConversation
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      responses:
+        '200':
+          description: Conversation details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '404':
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      summary: Update conversation (e.g. title)
+      operationId: UpdateConversation
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+      responses:
+        '200':
+          description: Updated conversation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+    delete:
+      summary: Delete a conversation
+      operationId: DeleteConversation
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Not found
+
+  /v1/conversations/{id}/messages:
+    get:
+      summary: List messages in a conversation
+      operationId: ListMessages
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          default: 50
+      responses:
+        '200':
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+
+  /v1/settings:
+    get:
+      summary: Get current settings (secrets masked)
+      operationId: GetSettings
+      responses:
+        '200':
+          description: Current application settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppConfig'
+    put:
+      summary: Update settings (encrypts secrets at rest)
+      operationId: UpdateSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppConfig'
+      responses:
+        '200':
+          description: Updated settings (secrets masked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppConfig'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/settings/test:
+    post:
+      summary: Test provider connection
+      operationId: TestConnection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - provider
+              properties:
+                provider:
+                  type: string
+                  enum: [ llm, image ]
+      responses:
+        '200':
+          description: Connection test result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionTestResult'
+
 components:
   schemas:
     ChatRequest:
@@ -170,6 +350,9 @@ components:
         model:
           type: string
           example: "llama3"
+        conversation_id:
+          type: string
+          description: "Optional. If omitted, a new conversation is created automatically."
 
     ChatResponse:
       type: object
@@ -179,6 +362,9 @@ components:
         thought:
           type: string
           description: "Chain of thought or reasoning trace"
+        conversation_id:
+          type: string
+          description: "The conversation this message belongs to"
         tool_call:
           type: object
           properties:
@@ -264,4 +450,95 @@ components:
       type: object
       properties:
         error:
+          type: string
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+        conversation_id:
+          type: string
+        role:
+          type: string
+          enum: [ user, assistant, system, tool ]
+        content:
+          type: string
+        thought:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReActStep'
+        tool_call:
+          type: object
+          properties:
+            name:
+              type: string
+            args:
+              type: object
+        created_at:
+          type: string
+          format: date-time
+
+    ProviderConfig:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [ local, remote ]
+          description: "'local' for Ollama/ComfyUI, 'remote' for OpenAI-compatible API"
+        local_url:
+          type: string
+          example: "http://localhost:11434/v1"
+        remote_url:
+          type: string
+          example: "https://api.openai.com/v1"
+        api_key:
+          type: string
+          description: "Masked on read (****xxxx), plaintext on write. Empty string keeps existing."
+        default_model:
+          type: string
+          example: "gemma3:12b"
+
+    AppConfig:
+      type: object
+      properties:
+        providers:
+          type: object
+          properties:
+            llm:
+              $ref: '#/components/schemas/ProviderConfig'
+            image:
+              $ref: '#/components/schemas/ProviderConfig'
+
+    ConnectionTestResult:
+      type: object
+      properties:
+        provider:
+          type: string
+        mode:
+          type: string
+        url:
+          type: string
+        model:
+          type: string
+        status:
+          type: string
+          enum: [ ok, error ]
+        message:
           type: string

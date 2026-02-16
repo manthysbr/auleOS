@@ -90,6 +90,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all conversations */
+        get: operations["ListConversations"];
+        put?: never;
+        /** Create a new conversation */
+        post: operations["CreateConversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get conversation details */
+        get: operations["GetConversation"];
+        put?: never;
+        post?: never;
+        /** Delete a conversation */
+        delete: operations["DeleteConversation"];
+        options?: never;
+        head?: never;
+        /** Update conversation (e.g. title) */
+        patch: operations["UpdateConversation"];
+        trace?: never;
+    };
+    "/v1/conversations/{id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List messages in a conversation */
+        get: operations["ListMessages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get current settings (secrets masked) */
+        get: operations["GetSettings"];
+        /** Update settings (encrypts secrets at rest) */
+        put: operations["UpdateSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test provider connection */
+        post: operations["TestConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -99,11 +188,15 @@ export interface components {
             message: string;
             /** @example llama3 */
             model?: string;
+            /** @description Optional. If omitted, a new conversation is created automatically. */
+            conversation_id?: string;
         };
         ChatResponse: {
             response?: string;
             /** @description Chain of thought or reasoning trace */
             thought?: string;
+            /** @description The conversation this message belongs to */
+            conversation_id?: string;
             tool_call?: {
                 name?: string;
                 args?: Record<string, never>;
@@ -154,6 +247,59 @@ export interface components {
         };
         Error: {
             error?: string;
+        };
+        Conversation: {
+            id?: string;
+            title?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+        };
+        Message: {
+            id?: string;
+            conversation_id?: string;
+            /** @enum {string} */
+            role?: "user" | "assistant" | "system" | "tool";
+            content?: string;
+            thought?: string;
+            steps?: components["schemas"]["ReActStep"][];
+            tool_call?: {
+                name?: string;
+                args?: Record<string, never>;
+            };
+            /** Format: date-time */
+            created_at?: string;
+        };
+        ProviderConfig: {
+            /**
+             * @description 'local' for Ollama/ComfyUI, 'remote' for OpenAI-compatible API
+             * @enum {string}
+             */
+            mode?: "local" | "remote";
+            /** @example http://localhost:11434/v1 */
+            local_url?: string;
+            /** @example https://api.openai.com/v1 */
+            remote_url?: string;
+            /** @description Masked on read (****xxxx), plaintext on write. Empty string keeps existing. */
+            api_key?: string;
+            /** @example gemma3:12b */
+            default_model?: string;
+        };
+        AppConfig: {
+            providers?: {
+                llm?: components["schemas"]["ProviderConfig"];
+                image?: components["schemas"]["ProviderConfig"];
+            };
+        };
+        ConnectionTestResult: {
+            provider?: string;
+            mode?: string;
+            url?: string;
+            model?: string;
+            /** @enum {string} */
+            status?: "ok" | "error";
+            message?: string;
         };
     };
     responses: never;
@@ -363,6 +509,243 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    ListConversations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of conversations */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Conversation"][];
+                };
+            };
+        };
+    };
+    CreateConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example New Chat */
+                    title?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Conversation created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Conversation"];
+                };
+            };
+        };
+    };
+    GetConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conversation details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Conversation"];
+                };
+            };
+            /** @description Conversation not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    DeleteConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    UpdateConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    title?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated conversation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Conversation"];
+                };
+            };
+        };
+    };
+    ListMessages: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of messages */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"][];
+                };
+            };
+        };
+    };
+    GetSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current application settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppConfig"];
+                };
+            };
+        };
+    };
+    UpdateSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppConfig"];
+            };
+        };
+        responses: {
+            /** @description Updated settings (secrets masked) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppConfig"];
+                };
+            };
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    TestConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    provider: "llm" | "image";
+                };
+            };
+        };
+        responses: {
+            /** @description Connection test result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTestResult"];
                 };
             };
         };
