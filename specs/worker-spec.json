@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WorkerSpec",
+  "type": "object",
+  "required": ["image"],
+  "properties": {
+    "image": {
+      "type": "string",
+      "description": "Container image to run"
+    },
+    "command": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Command override"
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Environment variables"
+    },
+    "resource_cpu": {
+      "type": "number",
+      "minimum": 0,
+      "description": "CPU cores (fractional)"
+    },
+    "resource_mem": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Memory in bytes"
+    },
+    "tags": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Metadata tags"
+    }
+  }
+}

@@ -1,0 +1,101 @@
+openapi: 3.0.3
+info:
+  title: auleOS Watchdog API
+  version: 1.0.0
+  description: API for the auleOS Watchdog sidecar running inside worker containers.
+servers:
+  - url: http://localhost:8080
+    description: Default local server
+paths:
+  /health:
+    get:
+      summary: Health Check
+      operationId: getHealth
+      responses:
+        '200':
+          description: Watchdog is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    $ref: '#/components/schemas/HealthStatus'
+                required:
+                  - status
+  /v1/exec:
+    post:
+      summary: Execute Command
+      operationId: executeCommand
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecRequest'
+      responses:
+        '200':
+          description: Command executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecResponse'
+        '500':
+            description: Command execution failed internally
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    HealthStatus:
+      type: string
+      enum: [alive, shutting_down]
+
+    ExecRequest:
+      type: object
+      required:
+        - command
+      properties:
+        command:
+          type: string
+          description: The binary or script to execute
+        args:
+          type: array
+          items:
+            type: string
+          description: Arguments for the command
+        env:
+          type: object
+          additionalProperties:
+            type: string
+          description: Environment variables
+        timeout_ms:
+          type: integer
+          minimum: 0
+          description: Execution timeout in milliseconds
+
+    ExecResponse:
+      type: object
+      required:
+        - exit_code
+        - output
+      properties:
+        exit_code:
+          type: integer
+          description: Process exit code
+        output:
+          type: string
+          description: Combined stdout/stderr output
+        error:
+          type: string
+          description: Error message if execution failed to start
+
+    Error:
+        type: object
+        required:
+            - error
+        properties:
+            error:
+                type: string

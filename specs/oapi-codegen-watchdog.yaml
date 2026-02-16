@@ -1,0 +1,7 @@
+package: watchdog
+generate:
+  models: true
+  strict-server: true
+  chi-server: false # We use net/http, standard interface is better or std-http
+  std-http-server: true # Generate standard http.Handler
+output: pkg/watchdog/api.gen.go
