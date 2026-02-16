@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"

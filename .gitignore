@@ -1,1 +1,10 @@
+# Binaries
+bin/
 aule-kernel
+*.db
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
