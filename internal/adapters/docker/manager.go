@@ -13,7 +13,6 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/google/uuid"
@@ -22,15 +21,16 @@ import (
 )
 
 const (
-	baseSocketDir    = "/tmp/aule/sockets"
-	baseWorkspaceDir = "/mnt/aule/workspace"
 	containerSockDir = "/var/run/aule"
 	watchdogSockName = "watchdog.sock"
 	containerUser    = "aule"
 )
 
 type Manager struct {
-	cli *client.Client
+	cli              *client.Client
+	baseSocketDir    string
+	baseWorkspaceDir string
+	hostUser         string
 }
 
 // NewManager creates a new Docker manager
@@ -39,7 +39,21 @@ func NewManager() (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create docker client: %w", err)
 	}
-	return &Manager{cli: cli}, nil
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user home dir: %w", err)
+	}
+
+	uid := os.Getuid()
+	gid := os.Getgid()
+
+	return &Manager{
+		cli:              cli,
+		baseSocketDir:    filepath.Join(home, ".aule", "sockets"),
+		baseWorkspaceDir: filepath.Join(home, ".aule", "workspaces"),
+		hostUser:         fmt.Sprintf("%d:%d", uid, gid),
+	}, nil
 }
 
 // Ensure Manager implements WorkerManager
@@ -49,8 +63,8 @@ func (m *Manager) Spawn(ctx context.Context, spec domain.WorkerSpec) (domain.Wor
 	id := domain.WorkerID(uuid.New().String())
 
 	// 1. Prepare Host Directories
-	socketDir := filepath.Join(baseSocketDir, string(id))
-	workspaceDir := filepath.Join(baseWorkspaceDir, string(id))
+	socketDir := filepath.Join(m.baseSocketDir, string(id))
+	workspaceDir := filepath.Join(m.baseWorkspaceDir, string(id))
 
 	if err := os.MkdirAll(socketDir, 0777); err != nil {
 		return "", fmt.Errorf("failed to create socket dir: %w", err)
@@ -78,7 +92,7 @@ func (m *Manager) Spawn(ctx context.Context, spec domain.WorkerSpec) (domain.Wor
 		Image:        spec.Image,
 		Cmd:          spec.Command,
 		Env:          envSlice,
-		User:         containerUser,
+		User:         m.hostUser,
 		Tty:          false,
 		OpenStdin:    false,
 		AttachStdout: false,
@@ -89,20 +103,21 @@ func (m *Manager) Spawn(ctx context.Context, spec domain.WorkerSpec) (domain.Wor
 		},
 	}
 
+	// Prepare Binds (Volumes)
+	// 1. Workspace Mount (Always)
+	binds := []string{
+		fmt.Sprintf("%s:/workspace", workspaceDir), // Fixed variable name from wsPath to workspaceDir
+		fmt.Sprintf("%s:%s", socketDir, containerSockDir),
+	}
+	
+	// 2. Custom Bind Mounts from Spec
+	for hostPath, containerPath := range spec.BindMounts {
+		binds = append(binds, fmt.Sprintf("%s:%s:ro", hostPath, containerPath)) // Default to ReadOnly for safety
+	}
+
 	hostCfg := &container.HostConfig{
 		NetworkMode: "none", // STRICT SECURITY RULE
-		Mounts: []mount.Mount{
-			{
-				Type:   mount.TypeBind,
-				Source: socketDir,
-				Target: containerSockDir,
-			},
-			{
-				Type:   mount.TypeBind,
-				Source: workspaceDir,
-				Target: "/workspace",
-			},
-		},
+		Binds:       binds,
 		Resources: container.Resources{
 			// TODO: Add CPU/Mem limit logic based on Spec
 			// NanoCPUs: int64(spec.ResourceCPU * 1e9),
@@ -176,7 +191,7 @@ func (m *Manager) HealthCheck(ctx context.Context, id domain.WorkerID) (domain.H
 	}
 
 	// 2. Ping Watchdog via Unix Socket
-	socketPath := filepath.Join(baseSocketDir, string(id), watchdogSockName)
+	socketPath := filepath.Join(m.baseSocketDir, string(id), watchdogSockName)
 	
 	httpClient := &http.Client{
 		Transport: &http.Transport{
@@ -213,8 +228,8 @@ func (m *Manager) Kill(ctx context.Context, id domain.WorkerID) error {
 
 	// Cleanup bind mounts
 	m.cleanup(
-		filepath.Join(baseSocketDir, string(id)),
-		filepath.Join(baseWorkspaceDir, string(id)),
+		filepath.Join(m.baseSocketDir, string(id)),
+		filepath.Join(m.baseWorkspaceDir, string(id)),
 	)
 
 	return nil
@@ -280,4 +295,21 @@ func makeFilters(m map[string]string) filters.Args {
 		args.Add(k, v)
 	}
 	return args
+}
+
+// GetWorkerIP returns the IP address of a worker container
+func (m *Manager) GetWorkerIP(ctx context.Context, workerID domain.WorkerID) (string, error) {
+	inspect, err := m.cli.ContainerInspect(ctx, string(workerID))
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect container: %w", err)
+	}
+
+	// Get IP from first network (usually bridge)
+	for _, network := range inspect.NetworkSettings.Networks {
+		if network.IPAddress != "" {
+			return network.IPAddress, nil
+		}
+	}
+
+	return "", fmt.Errorf("no IP address found for worker %s", workerID)
 }

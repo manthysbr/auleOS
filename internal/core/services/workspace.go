@@ -6,15 +6,18 @@ import (
 	"path/filepath"
 )
 
-const baseWorkspaceDir = "/mnt/aule/workspace"
-
 type WorkspaceManager struct {
 	baseDir string
 }
 
 func NewWorkspaceManager() *WorkspaceManager {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback to tmp if home fails (unlikely)
+		return &WorkspaceManager{baseDir: "/tmp/aule/workspaces"}
+	}
 	return &WorkspaceManager{
-		baseDir: baseWorkspaceDir,
+		baseDir: filepath.Join(home, ".aule", "workspaces"),
 	}
 }
 

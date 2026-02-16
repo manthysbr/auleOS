@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -27,6 +28,7 @@ type WorkerSpec struct {
 	ResourceCPU float64           `json:"resource_cpu"` // 0.5 = 50% core
 	ResourceMem int64             `json:"resource_mem"` // in bytes
 	Tags        map[string]string `json:"tags"`
+	BindMounts  map[string]string `json:"bind_mounts"` // HostPath -> ContainerPath
 }
 
 // Worker represents a running instance
@@ -42,3 +44,20 @@ type Worker struct {
 var (
 	ErrWorkerNotFound = errors.New("worker not found")
 )
+
+// ToolCall represents an intent execution by the agent
+type ToolCall struct {
+	Name string                 `json:"name"`
+	Args map[string]interface{} `json:"args"`
+}
+
+// ImageProvider defines the interface for image generation services
+type ImageProvider interface {
+	GenerateImage(ctx context.Context, prompt string) (string, error)
+}
+
+// LLMProvider defines the interface for LLM services
+type LLMProvider interface {
+	GenerateText(ctx context.Context, prompt string) (string, error)
+}
+

@@ -24,6 +24,24 @@ import (
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
 )
 
+// ChatRequest defines model for ChatRequest.
+type ChatRequest struct {
+	Message string  `json:"message"`
+	Model   *string `json:"model,omitempty"`
+}
+
+// ChatResponse defines model for ChatResponse.
+type ChatResponse struct {
+	Response *string `json:"response,omitempty"`
+
+	// Thought Chain of thought or reasoning trace
+	Thought  *string `json:"thought,omitempty"`
+	ToolCall *struct {
+		Args *map[string]interface{} `json:"args,omitempty"`
+		Name *string                 `json:"name,omitempty"`
+	} `json:"tool_call,omitempty"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	Error *string `json:"error,omitempty"`
@@ -58,17 +76,29 @@ type Resources struct {
 	MemoryMb *int     `json:"memory_mb,omitempty"`
 }
 
+// AgentChatJSONRequestBody defines body for AgentChat for application/json ContentType.
+type AgentChatJSONRequestBody = ChatRequest
+
 // SubmitJobJSONRequestBody defines body for SubmitJob for application/json ContentType.
 type SubmitJobJSONRequestBody = JobRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Chat with the Agent
+	// (POST /v1/agent/chat)
+	AgentChat(w http.ResponseWriter, r *http.Request)
+	// List all jobs
+	// (GET /v1/jobs)
+	ListJobs(w http.ResponseWriter, r *http.Request)
 	// Submit a new Job (AWU)
 	// (POST /v1/jobs)
 	SubmitJob(w http.ResponseWriter, r *http.Request)
 	// Get user job details
 	// (GET /v1/jobs/{id})
 	GetJob(w http.ResponseWriter, r *http.Request, id string)
+	// Serve a file directly from the job workspace
+	// (GET /v1/jobs/{id}/files/{filename})
+	ServeJobFile(w http.ResponseWriter, r *http.Request, id string, filename string)
 	// Stream job logs and status updates (SSE)
 	// (GET /v1/jobs/{id}/stream)
 	StreamJob(w http.ResponseWriter, r *http.Request, id string)
@@ -82,6 +112,34 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// AgentChat operation middleware
+func (siw *ServerInterfaceWrapper) AgentChat(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AgentChat(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListJobs operation middleware
+func (siw *ServerInterfaceWrapper) ListJobs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListJobs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // SubmitJob operation middleware
 func (siw *ServerInterfaceWrapper) SubmitJob(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +171,40 @@ func (siw *ServerInterfaceWrapper) GetJob(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetJob(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ServeJobFile operation middleware
+func (siw *ServerInterfaceWrapper) ServeJobFile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "filename" -------------
+	var filename string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "filename", r.PathValue("filename"), &filename, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "filename", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ServeJobFile(w, r, id, filename)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -267,11 +359,65 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 		ErrorHandlerFunc:   options.ErrorHandlerFunc,
 	}
 
+	m.HandleFunc("POST "+options.BaseURL+"/v1/agent/chat", wrapper.AgentChat)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs", wrapper.ListJobs)
 	m.HandleFunc("POST "+options.BaseURL+"/v1/jobs", wrapper.SubmitJob)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs/{id}", wrapper.GetJob)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs/{id}/files/{filename}", wrapper.ServeJobFile)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs/{id}/stream", wrapper.StreamJob)
 
 	return m
+}
+
+type AgentChatRequestObject struct {
+	Body *AgentChatJSONRequestBody
+}
+
+type AgentChatResponseObject interface {
+	VisitAgentChatResponse(w http.ResponseWriter) error
+}
+
+type AgentChat200JSONResponse ChatResponse
+
+func (response AgentChat200JSONResponse) VisitAgentChatResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AgentChat500JSONResponse Error
+
+func (response AgentChat500JSONResponse) VisitAgentChatResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListJobsRequestObject struct {
+}
+
+type ListJobsResponseObject interface {
+	VisitListJobsResponse(w http.ResponseWriter) error
+}
+
+type ListJobs200JSONResponse []Job
+
+func (response ListJobs200JSONResponse) VisitListJobsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListJobs500JSONResponse Error
+
+func (response ListJobs500JSONResponse) VisitListJobsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
 }
 
 type SubmitJobRequestObject struct {
@@ -335,6 +481,50 @@ func (response GetJob404JSONResponse) VisitGetJobResponse(w http.ResponseWriter)
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ServeJobFileRequestObject struct {
+	Id       string `json:"id"`
+	Filename string `json:"filename"`
+}
+
+type ServeJobFileResponseObject interface {
+	VisitServeJobFileResponse(w http.ResponseWriter) error
+}
+
+type ServeJobFile200ApplicationoctetStreamResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response ServeJobFile200ApplicationoctetStreamResponse) VisitServeJobFileResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type ServeJobFile404Response struct {
+}
+
+func (response ServeJobFile404Response) VisitServeJobFileResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
+	return nil
+}
+
+type ServeJobFile500Response struct {
+}
+
+func (response ServeJobFile500Response) VisitServeJobFileResponse(w http.ResponseWriter) error {
+	w.WriteHeader(500)
+	return nil
+}
+
 type StreamJobRequestObject struct {
 	Id string `json:"id"`
 }
@@ -372,12 +562,21 @@ func (response StreamJob404Response) VisitStreamJobResponse(w http.ResponseWrite
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// Chat with the Agent
+	// (POST /v1/agent/chat)
+	AgentChat(ctx context.Context, request AgentChatRequestObject) (AgentChatResponseObject, error)
+	// List all jobs
+	// (GET /v1/jobs)
+	ListJobs(ctx context.Context, request ListJobsRequestObject) (ListJobsResponseObject, error)
 	// Submit a new Job (AWU)
 	// (POST /v1/jobs)
 	SubmitJob(ctx context.Context, request SubmitJobRequestObject) (SubmitJobResponseObject, error)
 	// Get user job details
 	// (GET /v1/jobs/{id})
 	GetJob(ctx context.Context, request GetJobRequestObject) (GetJobResponseObject, error)
+	// Serve a file directly from the job workspace
+	// (GET /v1/jobs/{id}/files/{filename})
+	ServeJobFile(ctx context.Context, request ServeJobFileRequestObject) (ServeJobFileResponseObject, error)
 	// Stream job logs and status updates (SSE)
 	// (GET /v1/jobs/{id}/stream)
 	StreamJob(ctx context.Context, request StreamJobRequestObject) (StreamJobResponseObject, error)
@@ -410,6 +609,61 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// AgentChat operation middleware
+func (sh *strictHandler) AgentChat(w http.ResponseWriter, r *http.Request) {
+	var request AgentChatRequestObject
+
+	var body AgentChatJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AgentChat(ctx, request.(AgentChatRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AgentChat")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AgentChatResponseObject); ok {
+		if err := validResponse.VisitAgentChatResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListJobs operation middleware
+func (sh *strictHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
+	var request ListJobsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListJobs(ctx, request.(ListJobsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListJobs")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListJobsResponseObject); ok {
+		if err := validResponse.VisitListJobsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // SubmitJob operation middleware
@@ -469,6 +723,33 @@ func (sh *strictHandler) GetJob(w http.ResponseWriter, r *http.Request, id strin
 	}
 }
 
+// ServeJobFile operation middleware
+func (sh *strictHandler) ServeJobFile(w http.ResponseWriter, r *http.Request, id string, filename string) {
+	var request ServeJobFileRequestObject
+
+	request.Id = id
+	request.Filename = filename
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ServeJobFile(ctx, request.(ServeJobFileRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ServeJobFile")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ServeJobFileResponseObject); ok {
+		if err := validResponse.VisitServeJobFileResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // StreamJob operation middleware
 func (sh *strictHandler) StreamJob(w http.ResponseWriter, r *http.Request, id string) {
 	var request StreamJobRequestObject
@@ -498,20 +779,25 @@ func (sh *strictHandler) StreamJob(w http.ResponseWriter, r *http.Request, id st
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"H4sIAAAAAAAC/8xW328bNwz+VwRuQFPgcucs3cu9ZWuQuQOywEbRhzoo5BNtK9CvSpRbw7j/fZDuHP/G",
-	"MiAb+namSPEjv0+k19BY7axBQwHqNYRmgZrnz1vvrU8fzluHniRmM27MtHIINQTy0syhbYuNxU6fsCFo",
-	"C/hgp8cXNB45ofjCKf2aWa/TFwhOeElSIxSHVxdnkxYgxUmzxxAVnTwKxCmGl1cwwq8RA50oxGrNTc6P",
-	"37l2CqH+DG5FC2uggMsGCnBeGrp48wcqZdkn65V48xYeC5CEOpyE1xu493yVSzfL5MeFkCSt4ephD8S5",
-	"+G0JUvM57oHsMdbX5dXgMiipT7XcY7DRN12Wnz3OoIafqq1aql4q1ejZsc1hX6P0KFIruszFc6MezzU4",
-	"OGsCHnf4DLn/isHRbh0HBLq4c4mJeoo+hWjU1q++6OnOqTSE83R8nCOZpJnZ5C0wNF66xBTUcPMwZDPr",
-	"GS2Q8ajwrzH7E71BVTCulP0mzZyFONWSKH0+2Wlg3AgWyCPXyaTsPJSJHkmZub1b2M3DEApYog9dvkF5",
-	"VQ5SBdah4U5CDdfloLxOQuS0yEVXy6sqJcrtsJ2uU1N4wjwUUMM4I0pvt6MTA/1mxaqTvCE0OYY7p2ST",
-	"o6qnkNJvpsc/CWbnTbX7kiEfsZNeFkTG+Mvg6nUz92LLqffp+mCnrJ9OLMSmwRBmUan8DN8NBq8Go5us",
-	"JwAMzZIrKZIQWHDYyFmfICH49f9BQOgNVyygX6Jn2DsWEKLW3K+e9cE4M/iNpZ5d3Hz6+DY7bcRVraVo",
-	"E4g5nhDYHfbqctxzjYQ+QP15fYKN4XtIbyuNLE4LKMBwnV+jgEPdFDulH46FxyNNDV5TU+e09B6JSxU6",
-	"+bz778lLOY0lNrPRiAPS7pBYDOiztsQG2CFlVTd5zjI3zsc/GnmE36nCJRq63OLfXrjde9mnZt3+mBjB",
-	"iddsPekXygRqNoHRx/v74f3dBNqJmZg+Qtn5jruSBjvn3612UkkzL8syRxxv0mOabtOd/Yzf0cbLuexY",
-	"yEym/dCvjFQCiy79jwrsYjy+TU+ybf8OAAD//7Ogg/TiCQAA",
+	"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",
+	"WFPTJ6dnr6+vT6kpL5f/BAAA//9+Ws3AyhAAAA==",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

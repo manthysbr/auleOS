@@ -24,6 +24,9 @@ type WorkerManager interface {
 
 	// GetLogs searches for logs associated with a worker
 	GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
+
+	// GetWorkerIP returns the IP address of a worker container
+	GetWorkerIP(ctx context.Context, id domain.WorkerID) (string, error)
 }
 
 // Repository abstracts the persistent storage (DuckDB)

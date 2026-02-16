@@ -12,14 +12,16 @@ import (
 )
 
 type Server struct {
-	logger    *slog.Logger
-	lifecycle *services.WorkerLifecycle
-	eventBus  *services.EventBus
-	workerMgr interface {
+	logger       *slog.Logger
+	lifecycle    *services.WorkerLifecycle
+	agentService *services.AgentService
+	eventBus     *services.EventBus
+	workerMgr    interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	}
-	repo      interface { // Minimal repo interface needed for queries
+	repo interface { // Minimal repo interface needed for queries
 		GetJob(ctx context.Context, id domain.JobID) (domain.Job, error)
+		ListJobs(ctx context.Context) ([]domain.Job, error)
 	}
 }
 
@@ -27,21 +29,24 @@ type Server struct {
 var _ StrictServerInterface = (*Server)(nil)
 
 func NewServer(
-	logger *slog.Logger, 
+	logger *slog.Logger,
 	lifecycle *services.WorkerLifecycle,
+	agentService *services.AgentService,
 	eventBus *services.EventBus,
 	workerMgr interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	},
 	repo interface {
-	GetJob(ctx context.Context, id domain.JobID) (domain.Job, error)
-}) *Server {
+		GetJob(ctx context.Context, id domain.JobID) (domain.Job, error)
+		ListJobs(ctx context.Context) ([]domain.Job, error)
+	}) *Server {
 	return &Server{
-		logger:    logger,
-		lifecycle: lifecycle,
-		eventBus:  eventBus,
-		workerMgr: workerMgr,
-		repo:      repo,
+		logger:       logger,
+		lifecycle:    lifecycle,
+		agentService: agentService,
+		eventBus:     eventBus,
+		workerMgr:    workerMgr,
+		repo:         repo,
 	}
 }
 
@@ -194,4 +199,94 @@ func (s *Server) StreamJob(ctx context.Context, request StreamJobRequestObject) 
 		WorkerMgr: s.workerMgr,
 		Repo:      s.repo,
 	}, nil
+}
+
+// ListJobs implements StrictServerInterface
+func (s *Server) ListJobs(ctx context.Context, request ListJobsRequestObject) (ListJobsResponseObject, error) {
+	jobs, err := s.repo.ListJobs(ctx)
+	if err != nil {
+		s.logger.Error("failed to list jobs", "error", err)
+		errMsg := "Internal server error"
+		return ListJobs500JSONResponse{Error: &errMsg}, nil
+	}
+
+	toPtr := func(s string) *string { return &s }
+
+	response := make([]Job, len(jobs))
+	for i, job := range jobs {
+		response[i] = Job{
+			Id:        toPtr(string(job.ID)),
+			Status:    toPtr(string(job.Status)),
+			Result:    job.Result,
+			Error:     job.Error,
+			CreatedAt: &job.CreatedAt,
+		}
+	}
+
+	return ListJobs200JSONResponse(response), nil
+}
+
+// AgentChat implements StrictServerInterface
+func (s *Server) AgentChat(ctx context.Context, request AgentChatRequestObject) (AgentChatResponseObject, error) {
+	msg := request.Body.Message
+	model := "llama3"
+	if request.Body.Model != nil {
+		model = *request.Body.Model
+	}
+
+	resp, err := s.agentService.Chat(ctx, msg, model)
+	if err != nil {
+		s.logger.Error("agent chat failed", "error", err)
+		errMsg := err.Error()
+		return AgentChat500JSONResponse{Error: &errMsg}, nil
+	}
+
+	// Map domain response to generated response
+	// Note: ToolCall mapping is simplified here
+	var toolCall *struct {
+		Args *map[string]interface{} `json:"args,omitempty"`
+		Name *string                 `json:"name,omitempty"`
+	}
+	
+	if resp.ToolCall != nil {
+		name := resp.ToolCall.Name
+		args := resp.ToolCall.Args
+		toolCall = &struct {
+			Args *map[string]interface{} `json:"args,omitempty"`
+			Name *string                 `json:"name,omitempty"`
+		}{
+			Name: &name,
+			Args: &args,
+		}
+	}
+
+	response := AgentChat200JSONResponse{
+		Response: &resp.Response,
+		Thought:  &resp.Thought,
+		ToolCall: toolCall,
+	}
+
+	return response, nil
+}
+
+// ServeJobFileResponse implements the response interface for serving files
+type ServeJobFileResponse struct {
+	FilePath string
+}
+
+func (r ServeJobFileResponse) VisitServeJobFileResponse(w http.ResponseWriter) error {
+	http.ServeFile(w, nil, r.FilePath)
+	return nil
+}
+
+// ServeJobFile implements StrictServerInterface
+func (s *Server) ServeJobFile(ctx context.Context, request ServeJobFileRequestObject) (ServeJobFileResponseObject, error) {
+	path, err := s.lifecycle.GetJobFilePath(request.Id, request.Filename)
+	if err != nil {
+		s.logger.Error("failed to get job file path", "error", err)
+		// Assuming error means file not found or invalid path for now
+		return ServeJobFile404Response{}, nil 
+	}
+
+	return ServeJobFileResponse{FilePath: path}, nil
 }

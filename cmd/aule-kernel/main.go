@@ -15,9 +15,13 @@ import (
 
 	"github.com/manthysbr/auleOS/internal/adapters/docker"
 	"github.com/manthysbr/auleOS/internal/adapters/duckdb"
+	"github.com/manthysbr/auleOS/internal/adapters/imagegen"
+	"github.com/manthysbr/auleOS/internal/adapters/llm"
+	"github.com/manthysbr/auleOS/internal/core/domain"
 	"github.com/manthysbr/auleOS/internal/core/ports"
 	"github.com/manthysbr/auleOS/internal/core/services"
 	"github.com/manthysbr/auleOS/pkg/kernel"
+	"github.com/rs/cors"
 )
 
 func main() {
@@ -70,17 +74,64 @@ func run(logger *slog.Logger) error {
 	})
 	
 	lifecycle := services.NewWorkerLifecycle(logger, jobScheduler, workerMgr, repo, workspaceMgr, eventBus)
-
+	
+	// Provider Registry - manages local/remote providers
+	config := domain.DefaultConfig()
+	
+	// Initialize providers based on config
+	var llmProvider domain.LLMProvider
+	var imageProvider domain.ImageProvider
+	
+	if config.Providers.LLM.Mode == "local" {
+		llmProvider = llm.NewOllamaProvider(os.Getenv("OLLAMA_HOST"))
+	} else {
+		llmProvider = llm.NewOpenAIProvider(
+			config.Providers.LLM.RemoteURL,
+			config.Providers.LLM.APIKey,
+			config.Providers.LLM.DefaultModel,
+		)
+	}
+	
+	if config.Providers.Image.Mode == "local" {
+		comfyHost := os.Getenv("COMFYUI_HOST")
+		if comfyHost == "" {
+			comfyHost = config.Providers.Image.LocalURL
+		}
+		imageProvider = imagegen.NewDirectComfyUIProvider(comfyHost)
+	}
+	
+	// Tool Registry - register available tools
+	toolRegistry := domain.NewToolRegistry()
+	generateImageTool := services.NewGenerateImageTool(imageProvider)
+	if err := toolRegistry.Register(generateImageTool); err != nil {
+		logger.Error("failed to register generate_image tool", "error", err)
+		return err
+	}
+	
+	// ReAct Agent Service - agentic reasoning with tools
+	reactAgent := services.NewReActAgentService(logger, llmProvider, toolRegistry)
+	_ = reactAgent // TODO: Wire into HTTP endpoints
+	
+	// Legacy Agent Service (for compatibility)
+	agentService := services.NewAgentService(logger, llmProvider, imageProvider, lifecycle)
+	
 	// Initialize Kernel API Server
-	apiServer := kernel.NewServer(logger, lifecycle, eventBus, workerMgr, repo)
+	apiServer := kernel.NewServer(logger, lifecycle, agentService, eventBus, workerMgr, repo)
 	
 	// Setup HTTP Server
-	httpMux := http.NewServeMux()
-	httpMux.Handle("/", apiServer.Handler())
-	
+	// CORS Configuration
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:5173"},
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders:   []string{"*"},
+		AllowCredentials: true,
+	})
+
+	handler := c.Handler(apiServer.Handler())
+
 	httpServer := &http.Server{
 		Addr:    ":8080",
-		Handler: httpMux,
+		Handler: handler,
 	}
 
 	// Application Loop (using errgroup as per rules)

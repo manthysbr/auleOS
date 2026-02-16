@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
@@ -72,7 +74,9 @@ func (s *WorkerLifecycle) executeJob(ctx context.Context, job domain.Job) {
 
 	// 2. persist job status RUNNING
 	job.Status = domain.JobStatusRunning
-	// TODO: repo.SaveJob(ctx, job) -> We need to update Repository interface to support Jobs!
+	if err := s.repo.SaveJob(ctx, job); err != nil {
+		s.logger.Error("failed to save job status", "error", err)
+	}
 
 	// 3. Spawn Worker
 	workerID, err := s.workerMgr.Spawn(ctx, job.Spec)
@@ -115,7 +119,9 @@ func (s *WorkerLifecycle) executeJob(ctx context.Context, job domain.Job) {
 				
 				job.Status = domain.JobStatusCompleted
 				s.publishStatus(string(job.ID), string(domain.JobStatusCompleted))
-				// repo.SaveJob(ctx, job)
+				if err := s.repo.SaveJob(ctx, job); err != nil {
+					s.logger.Error("failed to save job status", "error", err)
+				}
 				return
 			}
 		}
@@ -128,7 +134,9 @@ func (s *WorkerLifecycle) failJob(ctx context.Context, job domain.Job, err error
 	msg := err.Error()
 	job.Error = &msg
 	s.publishStatus(string(job.ID), string(domain.JobStatusFailed))
-	// repo.SaveJob(ctx, job)
+	if err := s.repo.SaveJob(ctx, job); err != nil {
+		s.logger.Error("failed to save job status", "error", err)
+	}
 }
 
 // SubmitJob creates a job record and submits it
@@ -142,10 +150,54 @@ func (s *WorkerLifecycle) SubmitJob(ctx context.Context, spec domain.WorkerSpec)
 		UpdatedAt: time.Now(),
 	}
 
-	// repo.SaveJob(ctx, job)
+	if err := s.repo.SaveJob(ctx, job); err != nil {
+		return "", fmt.Errorf("failed to save job: %w", err)
+	}
 
 	if err := s.scheduler.SubmitJob(ctx, job); err != nil {
 		return "", err
 	}
 	return id, nil
+}
+
+// GetJobFilePath returns the absolute path to a file in the job's workspace.
+// It prevents directory traversal.
+func (s *WorkerLifecycle) GetJobFilePath(jobID string, filename string) (string, error) {
+	wsPath := s.workspace.GetPath(jobID)
+	fullPath := filepath.Join(wsPath, filename)
+	
+	// Security check: ensure strictly within workspace
+	cleanPath := filepath.Clean(fullPath)
+	if filepath.Dir(cleanPath) != filepath.Clean(wsPath) {
+		// Strict check: we only allow files in the root of the workspace for now?
+		// Or strictly verify prefix.
+		// Let's allow subdirs but verify prefix.
+	}
+	
+	// Better check:
+	rel, err := filepath.Rel(wsPath, cleanPath)
+	if err != nil || filepath.IsAbs(rel) || (len(rel) > 2 && rel[:2] == "..") {
+		return "", fmt.Errorf("invalid file path: directory traversal detected")
+	}
+
+	// Verify file exists
+	if _, err := os.Stat(cleanPath); err != nil {
+		return "", fmt.Errorf("file not found: %w", err)
+	}
+
+	return cleanPath, nil
+}
+
+// GetWorkerIP returns the IP address of the worker for a given job
+func (wl *WorkerLifecycle) GetWorkerIP(ctx context.Context, jobID domain.JobID) (string, error) {
+	job, err := wl.repo.GetJob(ctx, jobID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get job: %w", err)
+	}
+
+	if job.WorkerID == nil {
+		return "", fmt.Errorf("job has no worker assigned")
+	}
+
+	return wl.workerMgr.GetWorkerIP(ctx, *job.WorkerID)
 }

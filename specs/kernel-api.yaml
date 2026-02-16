@@ -35,6 +35,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+
+    get:
+      summary: List all jobs
+      operationId: ListJobs
+      responses:
+        '200':
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Job'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/jobs/{id}:
     get:
       summary: Get user job details
@@ -87,8 +106,88 @@ paths:
         '404':
           description: Job not found
 
+  /v1/jobs/{id}/files/{filename}:
+    get:
+      summary: Serve a file directly from the job workspace
+      operationId: ServeJobFile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The file content
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: File not found
+        '500':
+          description: Internal server error
+
+  /v1/agent/chat:
+    post:
+      summary: Chat with the Agent
+      operationId: AgentChat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Agent Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   schemas:
+    ChatRequest:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          example: "Run a python script that prints hello"
+        model:
+          type: string
+          example: "llama3"
+    
+    ChatResponse:
+      type: object
+      properties:
+        response:
+          type: string
+        thought:
+          type: string
+          description: "Chain of thought or reasoning trace"
+        tool_call:
+          type: object
+          properties:
+            name: 
+              type: string
+            args:
+              type: object
+
     JobRequest:
       type: object
       required:
