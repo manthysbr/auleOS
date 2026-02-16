@@ -102,7 +102,7 @@ func (r *Repository) SaveWorker(ctx context.Context, worker domain.Worker) error
 }
 
 func (r *Repository) GetWorker(ctx context.Context, id domain.WorkerID) (domain.Worker, error) {
-	query := `SELECT id, spec, status, created_at, updated_at, metadata FROM workers WHERE id = ?`
+	query := `SELECT id, CAST(spec AS TEXT), status, created_at, updated_at, CAST(metadata AS TEXT) FROM workers WHERE id = ?`
 	row := r.db.QueryRowContext(ctx, query, id)
 
 	var w domain.Worker
@@ -128,7 +128,7 @@ func (r *Repository) GetWorker(ctx context.Context, id domain.WorkerID) (domain.
 }
 
 func (r *Repository) ListWorkers(ctx context.Context) ([]domain.Worker, error) {
-	query := `SELECT id, spec, status, created_at, updated_at, metadata FROM workers`
+	query := `SELECT id, CAST(spec AS TEXT), status, created_at, updated_at, CAST(metadata AS TEXT) FROM workers`
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -213,7 +213,7 @@ func (r *Repository) SaveJob(ctx context.Context, job domain.Job) error {
 }
 
 func (r *Repository) GetJob(ctx context.Context, id domain.JobID) (domain.Job, error) {
-	query := `SELECT id, result, error, status, worker_id, spec, created_at, updated_at, metadata FROM jobs WHERE id = ?`
+	query := `SELECT id, result, error, status, worker_id, CAST(spec AS TEXT), created_at, updated_at, CAST(metadata AS TEXT) FROM jobs WHERE id = ?`
 	row := r.db.QueryRowContext(ctx, query, id)
 
 	var j domain.Job
@@ -245,7 +245,7 @@ func (r *Repository) GetJob(ctx context.Context, id domain.JobID) (domain.Job, e
 }
 
 func (r *Repository) ListJobs(ctx context.Context) ([]domain.Job, error) {
-	query := `SELECT id, result, error, status, worker_id, spec, created_at, updated_at, metadata FROM jobs ORDER BY created_at DESC`
+	query := `SELECT id, result, error, status, worker_id, CAST(spec AS TEXT), created_at, updated_at, CAST(metadata AS TEXT) FROM jobs ORDER BY created_at DESC`
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err

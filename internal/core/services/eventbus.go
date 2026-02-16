@@ -1,8 +1,6 @@
 package services
 
 import (
-	"context"
-	"fmt"
 	"log/slog"
 	"sync"
 )

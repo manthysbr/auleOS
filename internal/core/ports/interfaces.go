@@ -21,6 +21,9 @@ type WorkerManager interface {
 
 	// List returns all known workers in the runtime.
 	List(ctx context.Context) ([]domain.Worker, error)
+
+	// GetLogs searches for logs associated with a worker
+	GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 }
 
 // Repository abstracts the persistent storage (DuckDB)
@@ -36,9 +39,6 @@ type Repository interface {
 
 	// UpdateWorkerStatus updates just the status of a worker.
 	UpdateWorkerStatus(ctx context.Context, id domain.WorkerID, status domain.HealthStatus) error
-
-	// Logs
-	GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 
 	// Job Management
 	SaveJob(ctx context.Context, job domain.Job) error

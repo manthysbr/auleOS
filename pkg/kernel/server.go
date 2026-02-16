@@ -145,9 +145,7 @@ func (r StreamJobSSEResponse) VisitStreamJobResponse(w http.ResponseWriter) erro
 	w.WriteHeader(200)
 
 	// Verify Job exists first
-	ctx := context.Background() // TODO: inherit context from request if possible, but Visist doesn't have it easily.
-	// Actually we should check existence BEFORE returning this response.
-	// Assume existence checked in handler.
+	// ctx := context.Background() 
 
 	// 1. Subscribe to Events
 	eventCh, unsub := r.EventBus.Subscribe(r.JobID)
@@ -179,7 +177,7 @@ func (r StreamJobSSEResponse) VisitStreamJobResponse(w http.ResponseWriter) erro
 
 func (s *Server) StreamJob(ctx context.Context, request StreamJobRequestObject) (StreamJobResponseObject, error) {
 	// 1. Check if job exists
-	job, err := s.repo.GetJob(ctx, domain.JobID(request.Id))
+	_, err := s.repo.GetJob(ctx, domain.JobID(request.Id))
 	if err != nil {
 		if err == domain.ErrJobNotFound {
 			return StreamJob404Response{}, nil
