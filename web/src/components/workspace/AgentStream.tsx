@@ -11,6 +11,18 @@ export function AgentStream({ jobId }: AgentStreamProps) {
     const { events, status } = useEventStream(jobId);
     const scrollRef = useRef<HTMLDivElement>(null);
 
+    const getStatusLabel = (rawData: string) => {
+        try {
+            const parsed = JSON.parse(rawData) as { status?: string }
+            if (parsed.status && parsed.status.trim() !== "") {
+                return parsed.status
+            }
+        } catch {
+            // Keep raw fallback when payload is not JSON
+        }
+        return rawData
+    }
+
     // Auto-scroll to bottom
     useEffect(() => {
         if (scrollRef.current) {
@@ -76,7 +88,7 @@ export function AgentStream({ jobId }: AgentStreamProps) {
                                 {new Date(e.timestamp * 1000).toLocaleTimeString()}
                             </span>
                             {e.type === 'status' && (
-                                <span className="text-blue-400 font-bold">[STATUS] {e.data}</span>
+                                <span className="text-blue-400 font-bold">[STATUS] {getStatusLabel(e.data)}</span>
                             )}
                             {e.type === 'log' && (
                                 <span className="text-gray-300 break-all whitespace-pre-wrap">{e.data}</span>

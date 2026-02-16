@@ -35,7 +35,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-
     get:
       summary: List all jobs
       operationId: ListJobs
@@ -59,12 +58,12 @@ paths:
       summary: Get user job details
       operationId: GetJob
       parameters:
-        - in: path
-          name: id
-          schema:
-            type: string
-          required: true
-          description: Job ID
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+        description: Job ID
       responses:
         '200':
           description: Job Details
@@ -78,18 +77,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-    
+
   /v1/jobs/{id}/stream:
     get:
       summary: Stream job logs and status updates (SSE)
       operationId: StreamJob
       parameters:
-        - in: path
-          name: id
-          schema:
-            type: string
-          required: true
-          description: Job ID
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+        description: Job ID
       responses:
         '200':
           description: Event stream
@@ -111,16 +110,16 @@ paths:
       summary: Serve a file directly from the job workspace
       operationId: ServeJobFile
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: filename
-          in: path
-          required: true
-          schema:
-            type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: filename
+        in: path
+        required: true
+        schema:
+          type: string
       responses:
         '200':
           description: The file content
@@ -163,7 +162,7 @@ components:
     ChatRequest:
       type: object
       required:
-        - message
+      - message
       properties:
         message:
           type: string
@@ -171,7 +170,7 @@ components:
         model:
           type: string
           example: "llama3"
-    
+
     ChatResponse:
       type: object
       properties:
@@ -183,16 +182,37 @@ components:
         tool_call:
           type: object
           properties:
-            name: 
+            name:
               type: string
             args:
               type: object
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReActStep'
+
+    ReActStep:
+      type: object
+      properties:
+        thought:
+          type: string
+        action:
+          type: string
+        action_input:
+          type: object
+          additionalProperties: true
+        observation:
+          type: string
+        is_final_answer:
+          type: boolean
+        final_answer:
+          type: string
 
     JobRequest:
       type: object
       required:
-        - image
-        - command
+      - image
+      - command
       properties:
         image:
           type: string
@@ -201,7 +221,7 @@ components:
           type: array
           items:
             type: string
-          example: ["python", "-c", "print('Hello World')"]
+          example: [ "python", "-c", "print('Hello World')" ]
         env:
           type: object
           additionalProperties:
@@ -224,7 +244,7 @@ components:
           type: string
         status:
           type: string
-        result: 
+        result:
           type: string
         error:
           type: string
@@ -236,10 +256,10 @@ components:
       type: object
       properties:
         cpu:
-            type: number
+          type: number
         memory_mb:
-            type: integer
-    
+          type: integer
+
     Error:
       type: object
       properties:

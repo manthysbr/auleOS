@@ -8,13 +8,25 @@ interface Message {
     role: "user" | "assistant"
     content: string
     thought?: string
+    steps?: Array<{
+        thought?: string
+        action?: string
+        action_input?: Record<string, unknown>
+        observation?: string
+        is_final_answer?: boolean
+        final_answer?: string
+    }>
     toolCall?: {
         name: string
         args: any
     }
 }
 
-export function ChatInterface() {
+interface ChatInterfaceProps {
+    onOpenJob?: (jobId: string) => void
+}
+
+export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
     const [messages, setMessages] = useState<Message[]>([
         {
             id: "welcome",
@@ -66,9 +78,16 @@ export function ChatInterface() {
                     role: "assistant", // Logic mapping
                     content: data.response || "",
                     thought: data.thought,
+                    steps: data.steps,
                     toolCall: data.tool_call as any
                 }
                 setMessages(prev => [...prev, assistantMsg])
+
+                const toolCall = data.tool_call as { name?: string; args?: Record<string, unknown> } | undefined
+                const maybeJobId = toolCall?.args?.job_id
+                if (toolCall?.name === "generate_image" && typeof maybeJobId === "string" && onOpenJob) {
+                    onOpenJob(maybeJobId)
+                }
             }
         } catch (err: any) {
             const errorMsg: Message = {
@@ -113,6 +132,33 @@ export function ChatInterface() {
                                 <div className="text-xs text-muted-foreground bg-yellow-50/50 border border-yellow-200/50 rounded-lg p-2 flex gap-2 items-start animate-fade-in">
                                     <Cpu className="w-3 h-3 mt-0.5 text-yellow-600" />
                                     <span className="font-mono italic">{msg.thought}</span>
+                                </div>
+                            )}
+
+                            {/* ReAct Steps */}
+                            {msg.steps && msg.steps.length > 0 && (
+                                <div className="text-xs bg-white border border-black/10 rounded-lg p-3 space-y-2">
+                                    {msg.steps.map((step, index) => (
+                                        <div key={`${msg.id}-step-${index}`} className="space-y-1 pb-2 last:pb-0 border-b last:border-b-0 border-black/5">
+                                            {step.thought && (
+                                                <div className="font-mono text-muted-foreground">🧠 Pensamento: {step.thought}</div>
+                                            )}
+                                            {step.action && (
+                                                <div className="font-mono text-foreground/80">
+                                                    🛠️ Ação: {step.action}
+                                                    {step.action_input && (
+                                                        <span> ({JSON.stringify(step.action_input)})</span>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {step.observation && (
+                                                <div className="font-mono text-foreground/70">👀 Observação: {step.observation}</div>
+                                            )}
+                                            {step.final_answer && (
+                                                <div className="font-mono text-foreground">✅ Resposta: {step.final_answer}</div>
+                                            )}
+                                        </div>
+                                    ))}
                                 </div>
                             )}
 

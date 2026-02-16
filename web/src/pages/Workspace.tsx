@@ -36,7 +36,7 @@ export default function Workspace() {
                             <AgentStream jobId={selectedJobId} />
                         </div>
                     ) : (
-                        <ChatInterface />
+                        <ChatInterface onOpenJob={setSelectedJobId} />
                     )}
                 </main>
             </div>

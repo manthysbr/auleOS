@@ -11,26 +11,45 @@ export function useEventStream(jobId: string | null) {
     const [status, setStatus] = useState<'connecting' | 'connected' | 'error' | 'closed'>('closed');
 
     useEffect(() => {
-        if (!jobId) return;
+        if (!jobId) {
+            setEvents([]);
+            setStatus('closed');
+            return;
+        }
 
+        setEvents([]);
         setStatus('connecting');
         const eventSource = new EventSource(`http://localhost:8080/v1/jobs/${jobId}/stream`);
+
+        const appendEvent = (type: 'status' | 'log', data: string) => {
+            setEvents((prev) => [
+                ...prev,
+                {
+                    type,
+                    data,
+                    timestamp: Math.floor(Date.now() / 1000),
+                },
+            ]);
+        };
 
         eventSource.onopen = () => {
             setStatus('connected');
         };
 
+        eventSource.addEventListener('status', (event: MessageEvent) => {
+            appendEvent('status', event.data);
+        });
+
+        eventSource.addEventListener('log', (event: MessageEvent) => {
+            appendEvent('log', event.data);
+        });
+
         eventSource.onmessage = (event) => {
             // Heartbeats or raw messages
             if (event.data === 'ping') return;
 
-            try {
-                const parsed = JSON.parse(event.data) as KernelEvent;
-                setEvents((prev) => [...prev, parsed]);
-            } catch (e) {
-                // Fallback for raw text if any
-                console.warn('Failed to parse event', event.data);
-            }
+            // Fallback for unnamed events
+            appendEvent('log', event.data);
         };
 
         eventSource.onerror = (err) => {

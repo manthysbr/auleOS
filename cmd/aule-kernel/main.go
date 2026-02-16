@@ -15,8 +15,7 @@ import (
 
 	"github.com/manthysbr/auleOS/internal/adapters/docker"
 	"github.com/manthysbr/auleOS/internal/adapters/duckdb"
-	"github.com/manthysbr/auleOS/internal/adapters/imagegen"
-	"github.com/manthysbr/auleOS/internal/adapters/llm"
+	"github.com/manthysbr/auleOS/internal/adapters/providers"
 	"github.com/manthysbr/auleOS/internal/core/domain"
 	"github.com/manthysbr/auleOS/internal/core/ports"
 	"github.com/manthysbr/auleOS/internal/core/services"
@@ -68,56 +67,38 @@ func run(logger *slog.Logger) error {
 	// Initialize Core Services
 	eventBus := services.NewEventBus(logger) // Telemetry
 	workspaceMgr := services.NewWorkspaceManager()
-	
+
 	jobScheduler := services.NewJobScheduler(logger, services.SchedulerConfig{
 		MaxConcurrentJobs: 10,
 	})
-	
-	lifecycle := services.NewWorkerLifecycle(logger, jobScheduler, workerMgr, repo, workspaceMgr, eventBus)
-	
+
 	// Provider Registry - manages local/remote providers
 	config := domain.DefaultConfig()
-	
-	// Initialize providers based on config
-	var llmProvider domain.LLMProvider
-	var imageProvider domain.ImageProvider
-	
-	if config.Providers.LLM.Mode == "local" {
-		llmProvider = llm.NewOllamaProvider(os.Getenv("OLLAMA_HOST"))
-	} else {
-		llmProvider = llm.NewOpenAIProvider(
-			config.Providers.LLM.RemoteURL,
-			config.Providers.LLM.APIKey,
-			config.Providers.LLM.DefaultModel,
-		)
+
+	llmProvider, imageProvider, err := providers.Build(config)
+	if err != nil {
+		return fmt.Errorf("failed to build providers from config: %w", err)
 	}
-	
-	if config.Providers.Image.Mode == "local" {
-		comfyHost := os.Getenv("COMFYUI_HOST")
-		if comfyHost == "" {
-			comfyHost = config.Providers.Image.LocalURL
-		}
-		imageProvider = imagegen.NewDirectComfyUIProvider(comfyHost)
-	}
-	
+
+	lifecycle := services.NewWorkerLifecycle(logger, jobScheduler, workerMgr, repo, workspaceMgr, eventBus, imageProvider)
+
 	// Tool Registry - register available tools
 	toolRegistry := domain.NewToolRegistry()
-	generateImageTool := services.NewGenerateImageTool(imageProvider)
+	generateImageTool := services.NewGenerateImageTool(lifecycle)
 	if err := toolRegistry.Register(generateImageTool); err != nil {
 		logger.Error("failed to register generate_image tool", "error", err)
 		return err
 	}
-	
+
 	// ReAct Agent Service - agentic reasoning with tools
 	reactAgent := services.NewReActAgentService(logger, llmProvider, toolRegistry)
-	_ = reactAgent // TODO: Wire into HTTP endpoints
-	
+
 	// Legacy Agent Service (for compatibility)
 	agentService := services.NewAgentService(logger, llmProvider, imageProvider, lifecycle)
-	
+
 	// Initialize Kernel API Server
-	apiServer := kernel.NewServer(logger, lifecycle, agentService, eventBus, workerMgr, repo)
-	
+	apiServer := kernel.NewServer(logger, lifecycle, reactAgent, agentService, eventBus, workerMgr, repo)
+
 	// Setup HTTP Server
 	// CORS Configuration
 	c := cors.New(cors.Options{
@@ -150,7 +131,7 @@ func run(logger *slog.Logger) error {
 		}
 		return nil
 	})
-	
+
 	// 3. Graceful Shutdown for API Server
 	g.Go(func() error {
 		<-gCtx.Done()
@@ -166,7 +147,7 @@ func run(logger *slog.Logger) error {
 // reapZombies implements the startup cleanup strategy
 func reapZombies(ctx context.Context, logger *slog.Logger, mgr ports.WorkerManager, repo ports.Repository) error {
 	logger.Info("running zombie reaper")
-	
+
 	// TODO: Implement the full reconciliation loop defined in PLAN.md
 	// 1. Fetch running containers from Docker (mgr.List)
 	// 2. Fetch running workers from DB (repo.ListWorkers)

@@ -77,6 +77,7 @@ export function Sidebar({ currentJobId, onSelectJob }: SidebarProps) {
                         <div className={cn(
                             "h-2 w-2 rounded-full",
                             job.status === "RUNNING" ? "bg-green-500 animate-pulse" :
+                                job.status === "QUEUED" ? "bg-amber-500" :
                                 job.status === "COMPLETED" ? "bg-blue-500" :
                                     job.status === "FAILED" ? "bg-red-500" : "bg-gray-400"
                         )} />

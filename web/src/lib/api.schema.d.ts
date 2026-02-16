@@ -56,6 +56,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/jobs/{id}/files/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve a file directly from the job workspace */
+        get: operations["ServeJobFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/agent/chat": {
         parameters: {
             query?: never;
@@ -91,6 +108,17 @@ export interface components {
                 name?: string;
                 args?: Record<string, never>;
             };
+            steps?: components["schemas"]["ReActStep"][];
+        };
+        ReActStep: {
+            thought?: string;
+            action?: string;
+            action_input?: {
+                [key: string]: unknown;
+            };
+            observation?: string;
+            is_final_answer?: boolean;
+            final_answer?: string;
         };
         JobRequest: {
             /** @example python:3.10-slim */
@@ -262,6 +290,43 @@ export interface operations {
             };
             /** @description Job not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ServeJobFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file content */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description File not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

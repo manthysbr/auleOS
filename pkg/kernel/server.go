@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 type Server struct {
 	logger       *slog.Logger
 	lifecycle    *services.WorkerLifecycle
+	reactAgent   *services.ReActAgentService
 	agentService *services.AgentService
 	eventBus     *services.EventBus
 	workerMgr    interface {
@@ -31,6 +33,7 @@ var _ StrictServerInterface = (*Server)(nil)
 func NewServer(
 	logger *slog.Logger,
 	lifecycle *services.WorkerLifecycle,
+	reactAgent *services.ReActAgentService,
 	agentService *services.AgentService,
 	eventBus *services.EventBus,
 	workerMgr interface {
@@ -43,6 +46,7 @@ func NewServer(
 	return &Server{
 		logger:       logger,
 		lifecycle:    lifecycle,
+		reactAgent:   reactAgent,
 		agentService: agentService,
 		eventBus:     eventBus,
 		workerMgr:    workerMgr,
@@ -67,7 +71,7 @@ func (s *Server) SubmitJob(ctx context.Context, request SubmitJobRequestObject) 
 		Env:     make(map[string]string),
 		// Resources: ... map resources if needed
 	}
-	
+
 	if req.Env != nil {
 		for k, v := range *req.Env {
 			spec.Env[k] = v
@@ -115,12 +119,12 @@ func (s *Server) GetJob(ctx context.Context, request GetJobRequestObject) (GetJo
 
 // StreamJob implements StrictServerInterface
 // StreamJob implements StrictServerInterface
-// Note: We bypass the strict interface return type here essentially, 
+// Note: We bypass the strict interface return type here essentially,
 // because we are hijacking the ResponseWriter for SSE.
 // To do this cleanly with oapi-codegen strict middleware, we should return a body-less response or manage it manually.
-// However, since we are inside the Strict interface implementation, we don't have direct access to the `http.ResponseWriter` 
+// However, since we are inside the Strict interface implementation, we don't have direct access to the `http.ResponseWriter`
 // UNLESS we use the manually mounted handler method or middleware.
-// 
+//
 // CORRECTION: The Generated code passes `ctx` but NOT `ResponseWriter` to strict handlers.
 // We must modify `Server` struct to store `EventBus` and use it.
 // The issue is: `StrictServerInterface` returns `(StreamJobResponseObject, error)`.
@@ -128,8 +132,8 @@ func (s *Server) GetJob(ctx context.Context, request GetJobRequestObject) (GetJo
 // Let's create `StreamJobSSEResponse` that holds the logic.
 
 type StreamJobSSEResponse struct {
-	EventBus *services.EventBus
-	JobID    string
+	EventBus  *services.EventBus
+	JobID     string
 	WorkerMgr interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	}
@@ -150,7 +154,7 @@ func (r StreamJobSSEResponse) VisitStreamJobResponse(w http.ResponseWriter) erro
 	w.WriteHeader(200)
 
 	// Verify Job exists first
-	// ctx := context.Background() 
+	// ctx := context.Background()
 
 	// 1. Subscribe to Events
 	eventCh, unsub := r.EventBus.Subscribe(r.JobID)
@@ -159,7 +163,7 @@ func (r StreamJobSSEResponse) VisitStreamJobResponse(w http.ResponseWriter) erro
 	// 2. Stream Logs (if running or completed recently)
 	// For simplicity in this milestone, we only stream events from bus.
 	// Real log streaming from docker logs would need a separate goroutine pumping to the SSE writer.
-	
+
 	// Sending initial "connected" event
 	fmt.Fprintf(w, "event: connected\ndata: %s\n\n", r.JobID)
 	flusher.Flush()
@@ -168,15 +172,15 @@ func (r StreamJobSSEResponse) VisitStreamJobResponse(w http.ResponseWriter) erro
 	// We need a context to know when client disconnects. Visit doesn't provide it directly in signature (standard net/http).
 	// But `w` usually is linked to request.
 	// Ideally we pass context in struct.
-	
+
 	for event := range eventCh {
 		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, event.Data)
 		flusher.Flush()
-		
+
 		// If job finished, we might want to close, but user might want logs.
 		// For now, keep open until client disconnects.
 	}
-	
+
 	return nil
 }
 
@@ -234,39 +238,113 @@ func (s *Server) AgentChat(ctx context.Context, request AgentChatRequestObject) 
 		model = *request.Body.Model
 	}
 
-	resp, err := s.agentService.Chat(ctx, msg, model)
-	if err != nil {
-		s.logger.Error("agent chat failed", "error", err)
-		errMsg := err.Error()
+	var (
+		thought  string
+		response string
+		steps    *[]ReActStep
+		toolCall *struct {
+			Args *map[string]interface{} `json:"args,omitempty"`
+			Name *string                 `json:"name,omitempty"`
+		}
+	)
+
+	if s.reactAgent != nil {
+		reactResp, err := s.reactAgent.Chat(ctx, msg)
+		if err != nil {
+			s.logger.Error("react agent chat failed", "error", err)
+			errMsg := err.Error()
+			return AgentChat500JSONResponse{Error: &errMsg}, nil
+		}
+
+		response = reactResp.Response
+		thought = reactResp.Thought
+
+		apiSteps := make([]ReActStep, 0, len(reactResp.Steps))
+		for _, step := range reactResp.Steps {
+			apiStep := ReActStep{}
+			if step.Thought != "" {
+				value := step.Thought
+				apiStep.Thought = &value
+			}
+			if step.Action != "" {
+				value := step.Action
+				apiStep.Action = &value
+			}
+			if step.ActionInput != nil {
+				value := step.ActionInput
+				apiStep.ActionInput = &value
+			}
+			if step.Observation != "" {
+				value := step.Observation
+				apiStep.Observation = &value
+			}
+			if step.FinalAnswer != "" {
+				value := step.FinalAnswer
+				apiStep.FinalAnswer = &value
+			}
+			if step.IsFinalAnswer {
+				value := step.IsFinalAnswer
+				apiStep.IsFinalAnswer = &value
+			}
+			apiSteps = append(apiSteps, apiStep)
+		}
+		steps = &apiSteps
+
+		if len(reactResp.Steps) > 0 {
+			lastStep := reactResp.Steps[len(reactResp.Steps)-1]
+			if lastStep.Action != "" {
+				args := lastStep.ActionInput
+				if lastStep.Observation != "" {
+					var observed map[string]interface{}
+					if err := json.Unmarshal([]byte(lastStep.Observation), &observed); err == nil {
+						args = observed
+					}
+				}
+				name := lastStep.Action
+				toolCall = &struct {
+					Args *map[string]interface{} `json:"args,omitempty"`
+					Name *string                 `json:"name,omitempty"`
+				}{
+					Name: &name,
+					Args: &args,
+				}
+			}
+		}
+	} else if s.agentService != nil {
+		resp, err := s.agentService.Chat(ctx, msg, model)
+		if err != nil {
+			s.logger.Error("agent chat failed", "error", err)
+			errMsg := err.Error()
+			return AgentChat500JSONResponse{Error: &errMsg}, nil
+		}
+
+		response = resp.Response
+		thought = resp.Thought
+
+		if resp.ToolCall != nil {
+			name := resp.ToolCall.Name
+			args := resp.ToolCall.Args
+			toolCall = &struct {
+				Args *map[string]interface{} `json:"args,omitempty"`
+				Name *string                 `json:"name,omitempty"`
+			}{
+				Name: &name,
+				Args: &args,
+			}
+		}
+	} else {
+		errMsg := "no agent service configured"
 		return AgentChat500JSONResponse{Error: &errMsg}, nil
 	}
 
-	// Map domain response to generated response
-	// Note: ToolCall mapping is simplified here
-	var toolCall *struct {
-		Args *map[string]interface{} `json:"args,omitempty"`
-		Name *string                 `json:"name,omitempty"`
-	}
-	
-	if resp.ToolCall != nil {
-		name := resp.ToolCall.Name
-		args := resp.ToolCall.Args
-		toolCall = &struct {
-			Args *map[string]interface{} `json:"args,omitempty"`
-			Name *string                 `json:"name,omitempty"`
-		}{
-			Name: &name,
-			Args: &args,
-		}
-	}
-
-	response := AgentChat200JSONResponse{
-		Response: &resp.Response,
-		Thought:  &resp.Thought,
+	chatResponse := AgentChat200JSONResponse{
+		Response: &response,
+		Steps:    steps,
+		Thought:  &thought,
 		ToolCall: toolCall,
 	}
 
-	return response, nil
+	return chatResponse, nil
 }
 
 // ServeJobFileResponse implements the response interface for serving files
@@ -285,7 +363,7 @@ func (s *Server) ServeJobFile(ctx context.Context, request ServeJobFileRequestOb
 	if err != nil {
 		s.logger.Error("failed to get job file path", "error", err)
 		// Assuming error means file not found or invalid path for now
-		return ServeJobFile404Response{}, nil 
+		return ServeJobFile404Response{}, nil
 	}
 
 	return ServeJobFileResponse{FilePath: path}, nil

@@ -8,10 +8,10 @@ import (
 )
 
 // NewGenerateImageTool creates the image generation tool
-func NewGenerateImageTool(imageProvider domain.ImageProvider) *domain.Tool {
+func NewGenerateImageTool(lifecycle *WorkerLifecycle) *domain.Tool {
 	return &domain.Tool{
 		Name:        "generate_image",
-		Description: "Generates an image from a text prompt using ComfyUI",
+		Description: "Queues an image generation job using ComfyUI and returns the job id",
 		Parameters: domain.ToolParameters{
 			Type: "object",
 			Properties: map[string]interface{}{
@@ -28,21 +28,23 @@ func NewGenerateImageTool(imageProvider domain.ImageProvider) *domain.Tool {
 			if !ok {
 				return nil, fmt.Errorf("missing required parameter: prompt")
 			}
-			
+
 			prompt, ok := promptRaw.(string)
 			if !ok {
 				return nil, fmt.Errorf("prompt must be a string")
 			}
-			
-			// Generate image
-			imageURL, err := imageProvider.GenerateImage(ctx, prompt)
-			if err != nil {
-				return nil, fmt.Errorf("image generation failed: %w", err)
+			if lifecycle == nil {
+				return nil, fmt.Errorf("worker lifecycle is not configured")
 			}
-			
+
+			jobID, err := lifecycle.SubmitImageJob(ctx, prompt)
+			if err != nil {
+				return nil, fmt.Errorf("failed to queue image job: %w", err)
+			}
+
 			return map[string]interface{}{
-				"status": "success",
-				"url":    imageURL,
+				"status": "queued",
+				"job_id": string(jobID),
 				"prompt": prompt,
 			}, nil
 		},
