@@ -8,11 +8,16 @@ import (
 	"os/signal"
 	"syscall"
 
+	"net/http"
+	"time"
+
 	"golang.org/x/sync/errgroup"
 
 	"github.com/manthysbr/auleOS/internal/adapters/docker"
 	"github.com/manthysbr/auleOS/internal/adapters/duckdb"
 	"github.com/manthysbr/auleOS/internal/core/ports"
+	"github.com/manthysbr/auleOS/internal/core/services"
+	"github.com/manthysbr/auleOS/pkg/kernel"
 )
 
 func main() {
@@ -56,15 +61,52 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("zombie reaping failed: %w", err)
 	}
 
+	// Initialize Core Services
+	eventBus := services.NewEventBus(logger) // Telemetry
+	workspaceMgr := services.NewWorkspaceManager()
+	
+	jobScheduler := services.NewJobScheduler(logger, services.SchedulerConfig{
+		MaxConcurrentJobs: 10,
+	})
+	
+	lifecycle := services.NewWorkerLifecycle(logger, jobScheduler, workerMgr, repo, workspaceMgr, eventBus)
+
+	// Initialize Kernel API Server
+	apiServer := kernel.NewServer(logger, lifecycle, eventBus, workerMgr, repo)
+	
+	// Setup HTTP Server
+	httpMux := http.NewServeMux()
+	httpMux.Handle("/", apiServer.Handler())
+	
+	httpServer := &http.Server{
+		Addr:    ":8080",
+		Handler: httpMux,
+	}
+
 	// Application Loop (using errgroup as per rules)
 	g, gCtx := errgroup.WithContext(ctx)
 
-	// Example background service or API server could be started here.
-	// For now, we just wait for context cancel.
+	// 1. Start Worker Lifecycle (Scheduler Loop)
 	g.Go(func() error {
-		logger.Info("kernel is running")
-		<-gCtx.Done()
+		return lifecycle.Run(gCtx)
+	})
+
+	// 2. Start API Server
+	g.Go(func() error {
+		logger.Info("starting user api server", "addr", ":8080")
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("api server failed: %w", err)
+		}
 		return nil
+	})
+	
+	// 3. Graceful Shutdown for API Server
+	g.Go(func() error {
+		<-gCtx.Done()
+		logger.Info("shutting down api server")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return httpServer.Shutdown(shutdownCtx)
 	})
 
 	return g.Wait()

@@ -3,10 +3,7 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
-	"sync"
-	"time"
 
 	"github.com/manthysbr/auleOS/internal/core/domain"
 	"golang.org/x/sync/semaphore"

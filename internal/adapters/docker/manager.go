@@ -261,6 +261,18 @@ func (m *Manager) List(ctx context.Context) ([]domain.Worker, error) {
 	return workers, nil
 }
 
+func (m *Manager) GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error) {
+	cID := "aule-worker-" + string(id)
+	opts := container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     true,
+		Timestamps: false,
+	}
+	
+	return m.cli.ContainerLogs(ctx, cID, opts)
+}
+
 // Helper to construct list filters 
 func makeFilters(m map[string]string) filters.Args {
 	args := filters.NewArgs()

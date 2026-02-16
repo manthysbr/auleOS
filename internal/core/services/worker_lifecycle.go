@@ -17,6 +17,7 @@ type WorkerLifecycle struct {
 	workerMgr ports.WorkerManager
 	repo      ports.Repository
 	workspace *WorkspaceManager
+	eventBus  *EventBus
 }
 
 func NewWorkerLifecycle(
@@ -25,6 +26,7 @@ func NewWorkerLifecycle(
 	mgr ports.WorkerManager,
 	repo ports.Repository,
 	ws *WorkspaceManager,
+	eventBus *EventBus,
 ) *WorkerLifecycle {
 	return &WorkerLifecycle{
 		logger:    logger,
@@ -32,6 +34,7 @@ func NewWorkerLifecycle(
 		workerMgr: mgr,
 		repo:      repo,
 		workspace: ws,
+		eventBus:  eventBus,
 	}
 }
 
@@ -41,9 +44,21 @@ func (s *WorkerLifecycle) Run(ctx context.Context) error {
 	return nil
 }
 
+func (s *WorkerLifecycle) publishStatus(jobID string, status string) {
+	s.eventBus.Publish(Event{
+		JobID:     jobID,
+		Type:      EventTypeStatus,
+		Data:      fmt.Sprintf(`{"status": "%s"}`, status),
+		Timestamp: time.Now().Unix(),
+	})
+}
+
 // executeJob is the callback for the scheduler
 func (s *WorkerLifecycle) executeJob(ctx context.Context, job domain.Job) {
 	s.logger.Info("executing job", "job_id", job.ID)
+	
+	// Publish RUNNING
+	s.publishStatus(string(job.ID), string(domain.JobStatusRunning))
 
 	// 1. Create Workspace
 	wsPath, err := s.workspace.PrepareWorkspace(string(job.ID))
@@ -51,6 +66,7 @@ func (s *WorkerLifecycle) executeJob(ctx context.Context, job domain.Job) {
 		s.failJob(ctx, job, fmt.Errorf("workspace prep failed: %w", err))
 		return
 	}
+	s.logger.Info("workspace prepared", "path", wsPath)
 	// Defer cleanup if we want ephemeral workspaces (POLICY: do we keep them? Yes for debugging, maybe reap later)
 	// For now, keep them.
 
@@ -98,6 +114,7 @@ func (s *WorkerLifecycle) executeJob(ctx context.Context, job domain.Job) {
 				_ = s.workerMgr.Kill(ctx, workerID) // Ensure it's gone
 				
 				job.Status = domain.JobStatusCompleted
+				s.publishStatus(string(job.ID), string(domain.JobStatusCompleted))
 				// repo.SaveJob(ctx, job)
 				return
 			}
@@ -110,6 +127,7 @@ func (s *WorkerLifecycle) failJob(ctx context.Context, job domain.Job, err error
 	job.Status = domain.JobStatusFailed
 	msg := err.Error()
 	job.Error = &msg
+	s.publishStatus(string(job.ID), string(domain.JobStatusFailed))
 	// repo.SaveJob(ctx, job)
 }
 

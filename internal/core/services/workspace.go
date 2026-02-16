@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/manthysbr/auleOS/internal/core/domain"
 )
 
 const baseWorkspaceDir = "/mnt/aule/workspace"

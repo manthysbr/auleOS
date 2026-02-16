@@ -1,0 +1,148 @@
+openapi: 3.0.3
+info:
+  title: auleOS Kernel API
+  version: 0.1.0
+  description: API for the auleOS Kernel, allowing submitting jobs and streaming logs.
+
+paths:
+  /v1/jobs:
+    post:
+      summary: Submit a new Job (AWU)
+      operationId: SubmitJob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobRequest'
+      responses:
+        '201':
+          description: Job created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResponse'
+        '400':
+          description: Invalid job specification
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/jobs/{id}:
+    get:
+      summary: Get user job details
+      operationId: GetJob
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Job ID
+      responses:
+        '200':
+          description: Job Details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    
+  /v1/jobs/{id}/stream:
+    get:
+      summary: Stream job logs and status updates (SSE)
+      operationId: StreamJob
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Job ID
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  event: status
+                  data: {"status": "RUNNING"}
+
+                  event: log
+                  data: {"line": "Compiling..."}
+        '404':
+          description: Job not found
+
+components:
+  schemas:
+    JobRequest:
+      type: object
+      required:
+        - image
+        - command
+      properties:
+        image:
+          type: string
+          example: "python:3.10-slim"
+        command:
+          type: array
+          items:
+            type: string
+          example: ["python", "-c", "print('Hello World')"]
+        env:
+          type: object
+          additionalProperties:
+            type: string
+        resources:
+          $ref: '#/components/schemas/Resources'
+
+    JobResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        result: 
+          type: string
+        error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Resources:
+      type: object
+      properties:
+        cpu:
+            type: number
+        memory_mb:
+            type: integer
+    
+    Error:
+      type: object
+      properties:
+        error:
+          type: string

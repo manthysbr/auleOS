@@ -9,12 +9,17 @@ all: gen build
 OAPI_CODEGEN := $(shell go env GOPATH)/bin/oapi-codegen
 
 # Generation
-gen: gen-watchdog
+gen: gen-watchdog gen-kernel
 
 gen-watchdog:
 	@echo "Generating Watchdog API..."
 	@mkdir -p pkg/watchdog/api
 	$(OAPI_CODEGEN) -config specs/oapi-codegen-watchdog.yaml specs/watchdog-api.yaml
+
+gen-kernel:
+	@echo "Generating Kernel API..."
+	mkdir -p pkg/kernel
+	$(OAPI_CODEGEN) -config specs/oapi-codegen-kernel.yaml specs/kernel-api.yaml
 
 # Build
 build:
