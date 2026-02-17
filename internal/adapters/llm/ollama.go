@@ -77,8 +77,15 @@ func (p *OllamaProvider) Generate(ctx context.Context, prompt string, model stri
 	return genResp.Response, nil
 }
 
-// GenerateText implements domain.LLMProvider interface
+// GenerateText implements domain.LLMProvider interface using the default model
 func (p *OllamaProvider) GenerateText(ctx context.Context, prompt string) (string, error) {
-	// Use default model for now (can be configured later)
-	return p.Generate(ctx, prompt, "gemma3:12b")
+	return p.Generate(ctx, prompt, "llama3.2:latest")
+}
+
+// GenerateTextWithModel implements domain.LLMProvider — uses a specific model, falls back to default if empty
+func (p *OllamaProvider) GenerateTextWithModel(ctx context.Context, prompt string, modelID string) (string, error) {
+	if modelID == "" {
+		return p.GenerateText(ctx, prompt)
+	}
+	return p.Generate(ctx, prompt, modelID)
 }

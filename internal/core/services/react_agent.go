@@ -16,6 +16,7 @@ import (
 type ReActAgentService struct {
 	logger   *slog.Logger
 	llm      domain.LLMProvider
+	router   *ModelRouter
 	tools    *domain.ToolRegistry
 	convs    *ConversationStore
 	repo     personaReader
@@ -31,6 +32,7 @@ type personaReader interface {
 func NewReActAgentService(
 	logger *slog.Logger,
 	llm domain.LLMProvider,
+	router *ModelRouter,
 	tools *domain.ToolRegistry,
 	convs *ConversationStore,
 	repo personaReader,
@@ -38,6 +40,7 @@ func NewReActAgentService(
 	return &ReActAgentService{
 		logger:   logger,
 		llm:      llm,
+		router:   router,
 		tools:    tools,
 		convs:    convs,
 		repo:     repo,
@@ -108,12 +111,28 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 		effectiveTools = s.tools.FilterByNames(persona.AllowedTools)
 	}
 
+	// Resolve model: persona override > default
+	modelID := ""
+	if s.router != nil && persona != nil {
+		role := s.router.inferRoleFromPersona(persona)
+		modelID = s.router.ResolveModel(persona, role)
+	}
+
+	// Inject conversation ID into context for sub-agent tools
+	ctx = ContextWithConversation(ctx, convID)
+
 	for i := 0; i < s.maxIters; i++ {
 		s.logger.Info("ReAct iteration", "iteration", i+1)
 
-		// 1. Call LLM
+		// 1. Call LLM (with model override if available)
 		prompt := strings.Join(conversationHistory, "\n\n")
-		response, err := s.llm.GenerateText(ctx, prompt)
+		var response string
+		var err error
+		if s.router != nil && modelID != "" {
+			response, err = s.router.GenerateText(ctx, prompt, modelID)
+		} else {
+			response, err = s.llm.GenerateText(ctx, prompt)
+		}
 		if err != nil {
 			return nil, convID, fmt.Errorf("llm generate: %w", err)
 		}
@@ -215,8 +234,15 @@ RULES:
 2. Use "Action:" for tool name only
 3. Use "Action Input:" with valid JSON
 4. When done, use "Final Answer:" instead of Action
+5. For simple questions, greetings, or conversations that do NOT require tools, skip Action and go directly to "Final Answer:"
+6. Only use tools when the user explicitly asks for something that requires them (image generation, delegation, etc.)
 
-Example:
+Example (simple chat — NO tool needed):
+User: Hello, how are you?
+Thought: This is a simple greeting, I can answer directly without any tools.
+Final Answer: Hello! I'm doing well, how can I help you today?
+
+Example (tool needed):
 User: Generate an image of a sunset
 Thought: I need to create an image using the generate_image tool
 Action: generate_image

@@ -217,28 +217,55 @@ Agentes com personalidade definida que adaptam estilo, profundidade e formato de
 
 ---
 
-### M9 — Catálogo de Tools Expandido (TODO)
+### M9 — Sub-Agents Visíveis + Multi-Model + Model Discovery ✅ DONE
 
-**IMPACTO: MÉDIO-ALTO** — Incremental. Cada tool é independente.
+**IMPACTO: ALTO** — Arquitetura de sub-agents paralelos com visibilidade em tempo real.
 
-Novas ferramentas para o agente, visíveis na seção "Tools" do Desktop Shell.
+Implementação completa de sub-agents assíncronos visíveis na UI, roteamento multi-modelo, e discovery de modelos locais/remotos. Inspirado em padrões de CrewAI, smolagents e LangGraph.
 
-**Escopo**:
+**Implementado**:
 
-- **Tools de conteúdo**:
-  - `generate_audio` → TTS via Piper/Kokoro
-  - `summarize_text` → Resumo com modelo pequeno
-  - `web_search` → Busca web via SearXNG ou DuckDuckGo
-- **Frontend**: Seção "Tools" no dock mostra tools disponíveis com status (installed/available)
-  - Cada tool tem card com nome, descrição, provider, status
-  - Futuramente: "Tool Marketplace" para instalar novas
-- **Registro dinâmico**: Tools registradas via manifest JSON
+- **Domain Layer**:
+  - `ModelSpec` / `ModelRole` (general/code/creative/fast) + `RecommendedLocalModels()`
+  - `SubAgentTask` / `SubAgentEvent` / `SubAgentStatus` (pending/running/done/failed)
+  - `DelegateRequest` / `DelegateTaskSpec` — input para orquestração
+  - `Persona.ModelOverride` — override de modelo por persona
+  - `LLMProvider.GenerateTextWithModel()` — geração com modelo específico
 
-**Exit Criteria**:
+- **Services**:
+  - `ModelRouter` — resolve modelo: PersonaOverride > RoleDefault > ProviderDefault
+  - `ModelDiscovery` — descobre modelos do Ollama (`/api/tags`) e LiteLLM (`/v1/models`)
+  - `SubAgentOrchestrator` — executa tasks em paralelo com goroutines, mini-ReAct loop (3 iters), SSE events por sub-agent
+  - `delegate` tool — o agente principal chama `delegate` com array de tasks, cada uma rodando como sub-agent com persona/modelo/tools próprios
+  - `EventBus` com `EventTypeSubAgent` — publica eventos por conversation ID
 
-- Pelo menos 2 novas tools funcionais end-to-end
-- Tools visíveis na UI do Desktop Shell
-- Build/test passa
+- **API (OpenAPI)**:
+  - `GET /v1/models` — catálogo de modelos disponíveis
+  - `POST /v1/models/discover` — descobre modelos do Ollama/LiteLLM
+  - `GET /v1/conversations/{id}/events` — SSE real-time para sub-agent activity
+  - `model_override` em Persona create/update/response
+
+- **Adapters**:
+  - Ollama `GenerateTextWithModel()` — default llama3.2:3b
+  - OpenAI `GenerateTextWithModel()` — thread-safe via método interno
+
+- **Frontend**:
+  - `useSubAgentStream` hook — SSE para `/v1/conversations/{id}/events`
+  - `useModelStore` — catálogo de modelos com fetch + discover
+  - `useSubAgentStore` — Map de sub-agents ativos por ID
+  - `SubAgentCard` / `SubAgentTree` — cards visuais com cor da persona, status animado, thought bubble, resultado
+  - `ChatInterface` integrado com sub-agent tree em tempo real
+  - `Persona` store atualizado com `model_override`
+
+- **DuckDB**: Migration `model_override TEXT` na tabela personas
+
+**Validação**:
+
+- ✅ `GET /v1/models` → 5 modelos recomendados
+- ✅ `POST /v1/models/discover` → encontra llama3.2:latest (3.2B) do Ollama local
+- ✅ `POST /v1/personas` com `model_override` → retorna corretamente
+- ✅ `GET /v1/conversations/{id}/events` → SSE conecta e espera eventos
+- ✅ `go build ./...` ✅ `go test ./...` ✅ `tsc --noEmit` ✅ `vite build`
 
 ---
 
@@ -617,7 +644,7 @@ Times de agentes com coordenação sofisticada (handoff básico já implementado
           │          │          │
           ▼          │          ▼
   ┌────────────┐     │  ┌──────────────────┐
-  │ M8 Personas│     │  │ M9 Tools         │
+  │ M8 Personas│     │  │ M9 Sub-Agents    │
   │ (na shell) │     │  │ (visíveis no dock│
   └─────┬──────┘     │  └──────────────────┘
         │            │
@@ -648,7 +675,7 @@ Times de agentes com coordenação sofisticada (handoff básico já implementado
   │ M6  Conversations & Memory  ✅ DONE           │
   │ M7  Desktop Shell & Workspace  ✅ DONE        │
   │ M8  Sistema de Personas  ✅ DONE               │
-  │ M9  Tools Expandidos  ← PRÓXIMO               │
+  │ M9  Sub-Agents + Multi-Model  ✅ DONE          │
   └──────────────────┬────────────────────────────┘
                      ▼
   ┌───────────────────────────────────────────────┐

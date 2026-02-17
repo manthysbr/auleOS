@@ -124,6 +124,7 @@ func (r *Repository) migrate() error {
 	migrations := []string{
 		`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS project_id TEXT`,
 		`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS persona_id TEXT`,
+		`ALTER TABLE personas ADD COLUMN IF NOT EXISTS model_override TEXT DEFAULT ''`,
 	}
 	for _, m := range migrations {
 		_, _ = r.db.Exec(m) // ignore errors; DuckDB may not support IF NOT EXISTS on ALTER
@@ -755,10 +756,10 @@ func (r *Repository) DeleteArtifact(ctx context.Context, id domain.ArtifactID) e
 func (r *Repository) CreatePersona(ctx context.Context, p domain.Persona) error {
 	allowedJSON, _ := json.Marshal(p.AllowedTools)
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO personas (id, name, description, system_prompt, icon, color, allowed_tools, is_builtin, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO personas (id, name, description, system_prompt, icon, color, allowed_tools, model_override, is_builtin, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (id) DO NOTHING`,
-		p.ID, p.Name, p.Description, p.SystemPrompt, p.Icon, p.Color, string(allowedJSON), p.IsBuiltin, p.CreatedAt, p.UpdatedAt,
+		p.ID, p.Name, p.Description, p.SystemPrompt, p.Icon, p.Color, string(allowedJSON), p.ModelOverride, p.IsBuiltin, p.CreatedAt, p.UpdatedAt,
 	)
 	return err
 }
@@ -766,10 +767,11 @@ func (r *Repository) CreatePersona(ctx context.Context, p domain.Persona) error 
 func (r *Repository) GetPersona(ctx context.Context, id domain.PersonaID) (domain.Persona, error) {
 	var p domain.Persona
 	var idStr, allowedJSON string
+	var modelOverride sql.NullString
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, name, description, system_prompt, icon, color, CAST(allowed_tools AS TEXT), is_builtin, created_at, updated_at
+		`SELECT id, name, description, system_prompt, icon, color, CAST(allowed_tools AS TEXT), model_override, is_builtin, created_at, updated_at
 		 FROM personas WHERE id = ?`, id,
-	).Scan(&idStr, &p.Name, &p.Description, &p.SystemPrompt, &p.Icon, &p.Color, &allowedJSON, &p.IsBuiltin, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&idStr, &p.Name, &p.Description, &p.SystemPrompt, &p.Icon, &p.Color, &allowedJSON, &modelOverride, &p.IsBuiltin, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return domain.Persona{}, domain.ErrPersonaNotFound
@@ -778,12 +780,15 @@ func (r *Repository) GetPersona(ctx context.Context, id domain.PersonaID) (domai
 	}
 	p.ID = domain.PersonaID(idStr)
 	_ = json.Unmarshal([]byte(allowedJSON), &p.AllowedTools)
+	if modelOverride.Valid {
+		p.ModelOverride = modelOverride.String
+	}
 	return p, nil
 }
 
 func (r *Repository) ListPersonas(ctx context.Context) ([]domain.Persona, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, description, system_prompt, icon, color, CAST(allowed_tools AS TEXT), is_builtin, created_at, updated_at
+		`SELECT id, name, description, system_prompt, icon, color, CAST(allowed_tools AS TEXT), model_override, is_builtin, created_at, updated_at
 		 FROM personas ORDER BY is_builtin DESC, name ASC`,
 	)
 	if err != nil {
@@ -795,11 +800,15 @@ func (r *Repository) ListPersonas(ctx context.Context) ([]domain.Persona, error)
 	for rows.Next() {
 		var p domain.Persona
 		var idStr, allowedJSON string
-		if err := rows.Scan(&idStr, &p.Name, &p.Description, &p.SystemPrompt, &p.Icon, &p.Color, &allowedJSON, &p.IsBuiltin, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var modelOverride sql.NullString
+		if err := rows.Scan(&idStr, &p.Name, &p.Description, &p.SystemPrompt, &p.Icon, &p.Color, &allowedJSON, &modelOverride, &p.IsBuiltin, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.ID = domain.PersonaID(idStr)
 		_ = json.Unmarshal([]byte(allowedJSON), &p.AllowedTools)
+		if modelOverride.Valid {
+			p.ModelOverride = modelOverride.String
+		}
 		personas = append(personas, p)
 	}
 	return personas, nil
@@ -808,8 +817,8 @@ func (r *Repository) ListPersonas(ctx context.Context) ([]domain.Persona, error)
 func (r *Repository) UpdatePersona(ctx context.Context, p domain.Persona) error {
 	allowedJSON, _ := json.Marshal(p.AllowedTools)
 	result, err := r.db.ExecContext(ctx,
-		`UPDATE personas SET name = ?, description = ?, system_prompt = ?, icon = ?, color = ?, allowed_tools = ?, updated_at = ? WHERE id = ?`,
-		p.Name, p.Description, p.SystemPrompt, p.Icon, p.Color, string(allowedJSON), p.UpdatedAt, p.ID,
+		`UPDATE personas SET name = ?, description = ?, system_prompt = ?, icon = ?, color = ?, allowed_tools = ?, model_override = ?, updated_at = ? WHERE id = ?`,
+		p.Name, p.Description, p.SystemPrompt, p.Icon, p.Color, string(allowedJSON), p.ModelOverride, p.UpdatedAt, p.ID,
 	)
 	if err != nil {
 		return err

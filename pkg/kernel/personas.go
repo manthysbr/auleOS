@@ -24,17 +24,24 @@ func domainPersonaToAPI(p domain.Persona) Persona {
 		allowed = &p.AllowedTools
 	}
 
+	var modelOverride *string
+	if p.ModelOverride != "" {
+		mo := p.ModelOverride
+		modelOverride = &mo
+	}
+
 	return Persona{
-		Id:           &id,
-		Name:         &name,
-		Description:  &desc,
-		SystemPrompt: &prompt,
-		Icon:         &icon,
-		Color:        &color,
-		AllowedTools: allowed,
-		IsBuiltin:    &builtin,
-		CreatedAt:    &createdAt,
-		UpdatedAt:    &updatedAt,
+		Id:            &id,
+		Name:          &name,
+		Description:   &desc,
+		SystemPrompt:  &prompt,
+		Icon:          &icon,
+		Color:         &color,
+		AllowedTools:  allowed,
+		ModelOverride: modelOverride,
+		IsBuiltin:     &builtin,
+		CreatedAt:     &createdAt,
+		UpdatedAt:     &updatedAt,
 	}
 }
 
@@ -80,6 +87,9 @@ func (s *Server) CreatePersona(ctx context.Context, request CreatePersonaRequest
 	}
 	if request.Body.AllowedTools != nil {
 		p.AllowedTools = *request.Body.AllowedTools
+	}
+	if request.Body.ModelOverride != nil {
+		p.ModelOverride = *request.Body.ModelOverride
 	}
 
 	if err := s.repo.CreatePersona(ctx, p); err != nil {
@@ -130,6 +140,9 @@ func (s *Server) UpdatePersona(ctx context.Context, request UpdatePersonaRequest
 	}
 	if request.Body.AllowedTools != nil {
 		existing.AllowedTools = *request.Body.AllowedTools
+	}
+	if request.Body.ModelOverride != nil {
+		existing.ModelOverride = *request.Body.ModelOverride
 	}
 	existing.UpdatedAt = time.Now()
 

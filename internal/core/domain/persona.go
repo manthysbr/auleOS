@@ -12,16 +12,17 @@ type PersonaID string
 
 // Persona defines an agent personality with system prompt, style, and tool filtering
 type Persona struct {
-	ID           PersonaID `json:"id"`
-	Name         string    `json:"name"`
-	Description  string    `json:"description"`
-	SystemPrompt string    `json:"system_prompt"`
-	Icon         string    `json:"icon"`          // lucide icon name
-	Color        string    `json:"color"`         // tailwind color token, e.g. "blue", "emerald"
-	AllowedTools []string  `json:"allowed_tools"` // empty = all tools allowed
-	IsBuiltin    bool      `json:"is_builtin"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID            PersonaID `json:"id"`
+	Name          string    `json:"name"`
+	Description   string    `json:"description"`
+	SystemPrompt  string    `json:"system_prompt"`
+	Icon          string    `json:"icon"`           // lucide icon name
+	Color         string    `json:"color"`          // tailwind color token, e.g. "blue", "emerald"
+	AllowedTools  []string  `json:"allowed_tools"`  // empty = all tools allowed
+	ModelOverride string    `json:"model_override"` // empty = use default model; e.g. "qwen2.5-coder:3b"
+	IsBuiltin     bool      `json:"is_builtin"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 var (

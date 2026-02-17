@@ -127,8 +127,34 @@ func run(logger *slog.Logger) error {
 	// Conversation Store - in-memory cache backed by DuckDB (64 conversations cached)
 	convStore := services.NewConversationStore(repo, 64)
 
-	// ReAct Agent Service - agentic reasoning with tools
-	reactAgent := services.NewReActAgentService(logger, llmProvider, toolRegistry, convStore, repo)
+	// Model Router - resolves which model to use per persona/role
+	modelRouter := services.NewModelRouter(logger, llmProvider)
+
+	// Model Discovery - detect installed Ollama models on startup
+	discovery := services.NewModelDiscovery(logger)
+	ollamaURL := config.Providers.LLM.LocalURL
+	if ollamaURL == "" {
+		ollamaURL = "http://localhost:11434"
+	}
+	if discovered, err := discovery.DiscoverOllama(ctx, ollamaURL); err == nil && len(discovered) > 0 {
+		modelRouter.SetCatalog(discovered)
+		logger.Info("ollama models discovered", "count", len(discovered))
+	} else if err != nil {
+		logger.Warn("ollama model discovery failed (non-fatal)", "error", err)
+	}
+
+	// Sub-Agent Orchestrator - parallel delegation engine
+	subOrchestrator := services.NewSubAgentOrchestrator(logger, modelRouter, toolRegistry, repo, eventBus)
+
+	// Register delegate tool (must be after orchestrator creation)
+	delegateTool := services.NewDelegateTool(subOrchestrator)
+	if err := toolRegistry.Register(delegateTool); err != nil {
+		logger.Error("failed to register delegate tool", "error", err)
+		return err
+	}
+
+	// ReAct Agent Service - agentic reasoning with tools + model routing
+	reactAgent := services.NewReActAgentService(logger, llmProvider, modelRouter, toolRegistry, convStore, repo)
 
 	// Legacy Agent Service (for compatibility)
 	agentService := services.NewAgentService(logger, llmProvider, imageProvider, lifecycle)
@@ -142,7 +168,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("built-in personas seeded")
 
 	// Initialize Kernel API Server
-	apiServer := kernel.NewServer(logger, lifecycle, reactAgent, agentService, eventBus, settingsStore, convStore, workerMgr, repo)
+	apiServer := kernel.NewServer(logger, lifecycle, reactAgent, agentService, eventBus, settingsStore, convStore, modelRouter, discovery, workerMgr, repo)
 
 	// Setup HTTP Server
 	// CORS Configuration

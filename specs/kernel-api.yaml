@@ -546,6 +546,66 @@ paths:
         '404':
           description: Not found
 
+  /v1/models:
+    get:
+      summary: List available models (from catalog)
+      operationId: ListModels
+      responses:
+        '200':
+          description: List of available models
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelSpec'
+
+  /v1/models/discover:
+    post:
+      summary: Discover models from Ollama and/or LiteLLM
+      operationId: DiscoverModels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ollama_url:
+                  type: string
+                  example: "http://localhost:11434"
+                litellm_url:
+                  type: string
+                  example: "http://localhost:4000"
+                litellm_api_key:
+                  type: string
+      responses:
+        '200':
+          description: Discovered models
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelSpec'
+
+  /v1/conversations/{id}/events:
+    get:
+      summary: Stream conversation events including sub-agent activity (SSE)
+      operationId: StreamConversationEvents
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
   /v1/personas:
     get:
       summary: List all personas
@@ -591,6 +651,9 @@ paths:
                   type: array
                   items:
                     type: string
+                model_override:
+                  type: string
+                  description: "Override model for this persona (e.g. qwen2.5-coder:3b)"
       responses:
         '201':
           description: Persona created
@@ -652,6 +715,8 @@ paths:
                   type: array
                   items:
                     type: string
+                model_override:
+                  type: string
       responses:
         '200':
           description: Updated persona
@@ -962,6 +1027,9 @@ components:
           items:
             type: string
           description: "Tool names this persona can use. Empty means all tools."
+        model_override:
+          type: string
+          description: "Model to use for this persona. Empty means use system default."
         is_builtin:
           type: boolean
         created_at:
@@ -970,3 +1038,53 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    ModelSpec:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "qwen2.5:3b"
+        name:
+          type: string
+          example: "Qwen 2.5 3B"
+        provider:
+          type: string
+          example: "ollama"
+        role:
+          type: string
+          enum: [ general, code, creative, fast ]
+        size:
+          type: string
+          example: "3B"
+        base_url:
+          type: string
+        is_local:
+          type: boolean
+
+    SubAgentEvent:
+      type: object
+      properties:
+        sub_agent_id:
+          type: string
+        parent_id:
+          type: string
+        conversation_id:
+          type: string
+        persona_name:
+          type: string
+        persona_color:
+          type: string
+        persona_icon:
+          type: string
+        model_id:
+          type: string
+        status:
+          type: string
+          enum: [ pending, running, done, failed ]
+        thought:
+          type: string
+        result:
+          type: string
+        error:
+          type: string

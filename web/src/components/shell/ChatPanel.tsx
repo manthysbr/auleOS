@@ -34,23 +34,28 @@ const colorMap: Record<string, { bg: string; text: string; ring: string }> = {
     rose: { bg: "bg-rose-500/10", text: "text-rose-600", ring: "ring-rose-500/40" },
 }
 
-function PersonaChip({ persona, isActive, onClick }: { persona: Persona; isActive: boolean; onClick: () => void }) {
+function PersonaOrb({ persona, isActive, onClick }: { persona: Persona; isActive: boolean; onClick: () => void }) {
     const Icon = iconMap[persona.icon] ?? Bot
     const colors = colorMap[persona.color] ?? colorMap.blue
 
     return (
         <button
             onClick={onClick}
-            title={persona.description}
+            title={persona.name}
             className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all whitespace-nowrap",
+                "group relative flex items-center rounded-full h-8 overflow-hidden transition-all duration-300 ease-out",
+                "max-w-8 hover:max-w-36",
                 isActive
-                    ? `${colors.bg} ${colors.text} ring-2 ${colors.ring}`
+                    ? `${colors.bg} ${colors.text} ring-2 ring-offset-1 ${colors.ring} shadow-sm`
                     : "bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground"
             )}
         >
-            <Icon className="w-3 h-3" />
-            {persona.name}
+            <div className="w-8 h-8 flex items-center justify-center flex-shrink-0">
+                <Icon className={cn("w-3.5 h-3.5 transition-transform duration-200", "group-hover:scale-110")} />
+            </div>
+            <span className="pr-2.5 text-xs font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 delay-100">
+                {persona.name}
+            </span>
         </button>
     )
 }
@@ -109,8 +114,8 @@ export function ChatPanel() {
 
             {/* Persona Selector */}
             {personas.length > 0 && (
-                <div className="flex items-center gap-1.5 px-3 py-2 overflow-x-auto border-b border-border/50 scrollbar-thin">
-                    <PersonaChip
+                <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border/50">
+                    <PersonaOrb
                         persona={{
                             id: "__none__",
                             name: "Default",
@@ -127,7 +132,7 @@ export function ChatPanel() {
                         onClick={() => setActivePersona(null)}
                     />
                     {personas.map((p) => (
-                        <PersonaChip
+                        <PersonaOrb
                             key={p.id}
                             persona={p}
                             isActive={activePersonaId === p.id}

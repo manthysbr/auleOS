@@ -1,9 +1,121 @@
-import { useState, useRef, useEffect } from "react"
-import { Send, Bot, User, Cpu, Terminal } from "lucide-react"
+import { useState, useRef, useEffect, useCallback } from "react"
+import { Send, Bot, User, Cpu, Terminal, ChevronRight, Sparkles, Wrench, ArrowRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { api as client } from "@/lib/api"
 import { useConversationStore, type Message } from "@/store/conversations"
 import { usePersonaStore } from "@/store/personas"
+import { useSubAgentStore } from "@/store/subagents"
+import { useSubAgentStream, type SubAgentEvent } from "@/hooks/useSubAgentStream"
+import { SubAgentTree } from "./SubAgentCard"
+
+// ── Tool color mapping for distinct visual badges ─────────────────
+const toolColorMap: Record<string, { bg: string; text: string; border: string }> = {
+    generate_image: { bg: "bg-violet-50", text: "text-violet-700", border: "border-violet-200/60" },
+    generate_text: { bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-200/60" },
+    delegate: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200/60" },
+    list_jobs: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200/60" },
+    submit_job: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200/60" },
+}
+
+const defaultToolColor = { bg: "bg-gray-50", text: "text-gray-600", border: "border-gray-200/60" }
+
+function getToolColor(name: string) {
+    return toolColorMap[name] ?? defaultToolColor
+}
+
+function ToolBadge({ name, input }: { name: string; input?: unknown }) {
+    const tc = getToolColor(name)
+    return (
+        <div className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 border text-[11px]",
+            tc.bg, tc.text, tc.border
+        )}>
+            <Wrench className="w-3 h-3 flex-shrink-0" />
+            <span className="font-mono font-semibold">{name}</span>
+            {input != null && (
+                <span className="font-mono opacity-60 max-w-[180px] truncate">
+                    {typeof input === "string" ? input : JSON.stringify(input)}
+                </span>
+            )}
+        </div>
+    )
+}
+
+// ── Gemini-style collapsible reasoning ────────────────────────────
+function ReasoningDropdown({ thought, steps, toolCall }: {
+    thought?: string
+    steps?: Message["steps"]
+    toolCall?: Message["tool_call"]
+}) {
+    const [isOpen, setIsOpen] = useState(false)
+    const hasToolActions = steps?.some(s => s.action) || toolCall
+    const toolNames = [
+        ...(steps?.filter(s => s.action).map(s => s.action!) ?? []),
+        ...(toolCall?.name ? [toolCall.name] : []),
+    ]
+
+    return (
+        <div className="text-xs">
+            <button
+                onClick={() => setIsOpen(v => !v)}
+                className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors py-1 select-none"
+            >
+                <Sparkles className={cn(
+                    "w-3.5 h-3.5 transition-colors",
+                    hasToolActions ? "text-violet-500" : "text-amber-400"
+                )} />
+                <span className="font-medium">
+                    {hasToolActions ? "Usou ferramentas" : "Raciocínio"}
+                </span>
+                {toolNames.length > 0 && !isOpen && (
+                    <span className="text-[10px] font-mono bg-violet-100/80 text-violet-600 px-1.5 py-0.5 rounded-full">
+                        {toolNames.join(", ")}
+                    </span>
+                )}
+                <ChevronRight className={cn(
+                    "w-3 h-3 transition-transform duration-200",
+                    isOpen && "rotate-90"
+                )} />
+            </button>
+
+            <div className={cn(
+                "overflow-hidden transition-all duration-300 ease-out",
+                isOpen ? "max-h-[500px] opacity-100 mt-1" : "max-h-0 opacity-0"
+            )}>
+                <div className="space-y-2 pl-4 border-l-2 border-amber-200/40 pb-1">
+                    {thought && (
+                        <div className="flex gap-2 items-start">
+                            <Cpu className="w-3 h-3 mt-0.5 text-amber-500 flex-shrink-0" />
+                            <span className="font-mono italic text-foreground/60">{thought}</span>
+                        </div>
+                    )}
+                    {steps?.map((step, i) => (
+                        <div key={i} className="space-y-1.5">
+                            {step.thought && (
+                                <div className="flex gap-2 items-start">
+                                    <Cpu className="w-3 h-3 mt-0.5 text-amber-500 flex-shrink-0" />
+                                    <span className="font-mono italic text-foreground/60">{step.thought}</span>
+                                </div>
+                            )}
+                            {step.action && (
+                                <ToolBadge name={step.action} input={step.action_input} />
+                            )}
+                            {step.observation && (
+                                <div className="flex gap-2 items-start pl-4">
+                                    <ArrowRight className="w-3 h-3 mt-0.5 text-teal-500 flex-shrink-0" />
+                                    <span className="font-mono text-foreground/50 text-[11px]">{step.observation}</span>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                    {toolCall && (
+                        <ToolBadge name={toolCall.name ?? "tool"} input={toolCall.args} />
+                    )}
+                </div>
+            </div>
+        </div>
+    )
+}
 
 interface ChatInterfaceProps {
     onOpenJob?: (jobId: string) => void
@@ -18,6 +130,19 @@ export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
     } = useConversationStore()
 
     const { activePersonaId } = usePersonaStore()
+    const { agents, processEvent, clear: clearSubAgents } = useSubAgentStore()
+
+    // SSE connection for sub-agent events
+    const handleSubAgentEvent = useCallback(
+        (evt: SubAgentEvent) => processEvent(evt),
+        [processEvent]
+    )
+    useSubAgentStream(activeConversationId, handleSubAgentEvent)
+
+    // Clear sub-agents on conversation switch
+    useEffect(() => {
+        clearSubAgents()
+    }, [activeConversationId, clearSubAgents])
 
     const [input, setInput] = useState("")
     const [isLoading, setIsLoading] = useState(false)
@@ -53,7 +178,7 @@ export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
             const { data, error } = await client.POST("/v1/agent/chat", {
                 body: {
                     message: userContent,
-                    model: "llama3.2",
+                    model: "llama3.2:latest",
                     ...(activeConversationId ? { conversation_id: activeConversationId } : {}),
                     ...(activePersonaId ? { persona_id: activePersonaId } : {}),
                 },
@@ -142,56 +267,17 @@ export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
                             {msg.role === "user" ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
                         </div>
 
-                        <div className="space-y-2 min-w-0">
-                            {/* Thought Bubble */}
-                            {msg.thought && (
-                                <div className="text-xs text-muted-foreground bg-yellow-50/50 border border-yellow-200/50 rounded-lg p-2 flex gap-2 items-start animate-fade-in">
-                                    <Cpu className="w-3 h-3 mt-0.5 text-yellow-600" />
-                                    <span className="font-mono italic">{msg.thought}</span>
-                                </div>
+                        <div className="space-y-1.5 min-w-0">
+                            {/* Collapsible Reasoning (Gemini-style) */}
+                            {msg.role === "assistant" && (msg.thought || (msg.steps && msg.steps.length > 0) || msg.tool_call) && (
+                                <ReasoningDropdown
+                                    thought={msg.thought}
+                                    steps={msg.steps}
+                                    toolCall={msg.tool_call}
+                                />
                             )}
 
-                            {/* ReAct Steps */}
-                            {msg.steps && msg.steps.length > 0 && (
-                                <div className="text-xs bg-white border border-black/10 rounded-lg p-3 space-y-2">
-                                    {msg.steps.map((step, index) => (
-                                        <div key={`${msg.id}-step-${index}`} className="space-y-1 pb-2 last:pb-0 border-b last:border-b-0 border-black/5">
-                                            {step.thought && (
-                                                <div className="font-mono text-muted-foreground">🧠 Pensamento: {step.thought}</div>
-                                            )}
-                                            {step.action && (
-                                                <div className="font-mono text-foreground/80">
-                                                    🛠️ Ação: {step.action}
-                                                    {step.action_input && (
-                                                        <span> ({JSON.stringify(step.action_input)})</span>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {step.observation && (
-                                                <div className="font-mono text-foreground/70">👀 Observação: {step.observation}</div>
-                                            )}
-                                            {step.final_answer && (
-                                                <div className="font-mono text-foreground">✅ Resposta: {step.final_answer}</div>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* Tool Call Visualization */}
-                            {msg.tool_call && (
-                                <div className="text-xs font-mono bg-black/80 text-green-400 rounded-lg p-3 border border-green-900/50 shadow-inner">
-                                    <div className="flex items-center gap-2 mb-1 text-green-500/80 border-b border-green-900/50 pb-1">
-                                        <Terminal className="w-3 h-3" />
-                                        <span>Tool: {msg.tool_call.name}</span>
-                                    </div>
-                                    <pre className="overflow-x-auto whitespace-pre-wrap">
-                                        {JSON.stringify(msg.tool_call.args, null, 2)}
-                                    </pre>
-                                </div>
-                            )}
-
-                            {/* Main Content */}
+                            {/* Main Content Bubble */}
                             <div
                                 className={cn(
                                     "p-3 rounded-2xl text-sm shadow-sm",
@@ -211,6 +297,10 @@ export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
                         </div>
                     </div>
                 ))}
+                {/* Sub-Agent Activity Tree */}
+                {agents.size > 0 && (
+                    <SubAgentTree agents={Array.from(agents.values())} />
+                )}
                 {isLoading && (
                     <div className="flex gap-3 mr-auto">
                         <div className="w-8 h-8 rounded-full bg-white border border-black/10 flex items-center justify-center animate-pulse">

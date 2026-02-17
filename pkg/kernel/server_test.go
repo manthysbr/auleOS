@@ -87,7 +87,7 @@ func TestServer_E2E_SubmitAndGet(t *testing.T) {
 	// Conversation store for test
 	convStore := services.NewConversationStore(repo, 16)
 
-	server := NewServer(logger, lifecycle, nil, nil, bus, settingsStore, convStore, mockWM, repo)
+	server := NewServer(logger, lifecycle, nil, nil, bus, settingsStore, convStore, nil, nil, mockWM, repo)
 	handler := server.Handler()
 
 	// 1. Submit

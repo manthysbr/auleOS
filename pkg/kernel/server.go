@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/manthysbr/auleOS/internal/config"
 	"github.com/manthysbr/auleOS/internal/core/domain"
@@ -22,6 +23,8 @@ type Server struct {
 	eventBus     *services.EventBus
 	settings     *config.SettingsStore
 	convStore    *services.ConversationStore
+	modelRouter  *services.ModelRouter
+	discovery    *services.ModelDiscovery
 	workerMgr    interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	}
@@ -61,6 +64,8 @@ func NewServer(
 	eventBus *services.EventBus,
 	settings *config.SettingsStore,
 	convStore *services.ConversationStore,
+	modelRouter *services.ModelRouter,
+	discovery *services.ModelDiscovery,
 	workerMgr interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	},
@@ -92,6 +97,8 @@ func NewServer(
 		eventBus:     eventBus,
 		settings:     settings,
 		convStore:    convStore,
+		modelRouter:  modelRouter,
+		discovery:    discovery,
 		workerMgr:    workerMgr,
 		repo:         repo,
 	}
@@ -106,7 +113,28 @@ func (s *Server) Handler() http.Handler {
 	strictHandler := NewStrictHandler(s, nil)
 	HandlerFromMux(strictHandler, mux)
 
-	return mux
+	// Wrap with SSE interceptor — our raw HTTP handler takes priority
+	// over the generated strict handler for the SSE endpoint.
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Intercept SSE endpoint for conversation events
+		if r.Method == "GET" && isConversationEventsPath(r.URL.Path) {
+			s.handleConversationSSE(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+// isConversationEventsPath checks if an URL path matches /v1/conversations/{id}/events
+func isConversationEventsPath(path string) bool {
+	// Pattern: /v1/conversations/<uuid>/events
+	const prefix = "/v1/conversations/"
+	const suffix = "/events"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return false
+	}
+	middle := path[len(prefix) : len(path)-len(suffix)]
+	return len(middle) > 0 && !strings.Contains(middle, "/")
 }
 
 // SubmitJob implements StrictServerInterface

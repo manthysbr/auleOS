@@ -48,6 +48,14 @@ const (
 	User      MessageRole = "user"
 )
 
+// Defines values for ModelSpecRole.
+const (
+	Code     ModelSpecRole = "code"
+	Creative ModelSpecRole = "creative"
+	Fast     ModelSpecRole = "fast"
+	General  ModelSpecRole = "general"
+)
+
 // Defines values for ProviderConfigMode.
 const (
 	Local  ProviderConfigMode = "local"
@@ -195,6 +203,20 @@ type Message struct {
 // MessageRole defines model for Message.Role.
 type MessageRole string
 
+// ModelSpec defines model for ModelSpec.
+type ModelSpec struct {
+	BaseUrl  *string        `json:"base_url,omitempty"`
+	Id       *string        `json:"id,omitempty"`
+	IsLocal  *bool          `json:"is_local,omitempty"`
+	Name     *string        `json:"name,omitempty"`
+	Provider *string        `json:"provider,omitempty"`
+	Role     *ModelSpecRole `json:"role,omitempty"`
+	Size     *string        `json:"size,omitempty"`
+}
+
+// ModelSpecRole defines model for ModelSpec.Role.
+type ModelSpecRole string
+
 // Persona defines model for Persona.
 type Persona struct {
 	// AllowedTools Tool names this persona can use. Empty means all tools.
@@ -206,12 +228,15 @@ type Persona struct {
 	Description *string    `json:"description,omitempty"`
 
 	// Icon Lucide icon name
-	Icon         *string    `json:"icon,omitempty"`
-	Id           *string    `json:"id,omitempty"`
-	IsBuiltin    *bool      `json:"is_builtin,omitempty"`
-	Name         *string    `json:"name,omitempty"`
-	SystemPrompt *string    `json:"system_prompt,omitempty"`
-	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
+	Icon      *string `json:"icon,omitempty"`
+	Id        *string `json:"id,omitempty"`
+	IsBuiltin *bool   `json:"is_builtin,omitempty"`
+
+	// ModelOverride Model to use for this persona. Empty means use system default.
+	ModelOverride *string    `json:"model_override,omitempty"`
+	Name          *string    `json:"name,omitempty"`
+	SystemPrompt  *string    `json:"system_prompt,omitempty"`
+	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
 }
 
 // Project defines model for Project.
@@ -278,24 +303,35 @@ type ListMessagesParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// DiscoverModelsJSONBody defines parameters for DiscoverModels.
+type DiscoverModelsJSONBody struct {
+	LitellmApiKey *string `json:"litellm_api_key,omitempty"`
+	LitellmUrl    *string `json:"litellm_url,omitempty"`
+	OllamaUrl     *string `json:"ollama_url,omitempty"`
+}
+
 // CreatePersonaJSONBody defines parameters for CreatePersona.
 type CreatePersonaJSONBody struct {
 	AllowedTools *[]string `json:"allowed_tools,omitempty"`
 	Color        *string   `json:"color,omitempty"`
 	Description  *string   `json:"description,omitempty"`
 	Icon         *string   `json:"icon,omitempty"`
-	Name         string    `json:"name"`
-	SystemPrompt string    `json:"system_prompt"`
+
+	// ModelOverride Override model for this persona (e.g. qwen2.5-coder:3b)
+	ModelOverride *string `json:"model_override,omitempty"`
+	Name          string  `json:"name"`
+	SystemPrompt  string  `json:"system_prompt"`
 }
 
 // UpdatePersonaJSONBody defines parameters for UpdatePersona.
 type UpdatePersonaJSONBody struct {
-	AllowedTools *[]string `json:"allowed_tools,omitempty"`
-	Color        *string   `json:"color,omitempty"`
-	Description  *string   `json:"description,omitempty"`
-	Icon         *string   `json:"icon,omitempty"`
-	Name         *string   `json:"name,omitempty"`
-	SystemPrompt *string   `json:"system_prompt,omitempty"`
+	AllowedTools  *[]string `json:"allowed_tools,omitempty"`
+	Color         *string   `json:"color,omitempty"`
+	Description   *string   `json:"description,omitempty"`
+	Icon          *string   `json:"icon,omitempty"`
+	ModelOverride *string   `json:"model_override,omitempty"`
+	Name          *string   `json:"name,omitempty"`
+	SystemPrompt  *string   `json:"system_prompt,omitempty"`
 }
 
 // CreateProjectJSONBody defines parameters for CreateProject.
@@ -329,6 +365,9 @@ type UpdateConversationJSONRequestBody UpdateConversationJSONBody
 
 // SubmitJobJSONRequestBody defines body for SubmitJob for application/json ContentType.
 type SubmitJobJSONRequestBody = JobRequest
+
+// DiscoverModelsJSONRequestBody defines body for DiscoverModels for application/json ContentType.
+type DiscoverModelsJSONRequestBody DiscoverModelsJSONBody
 
 // CreatePersonaJSONRequestBody defines body for CreatePersona for application/json ContentType.
 type CreatePersonaJSONRequestBody CreatePersonaJSONBody
@@ -377,6 +416,9 @@ type ServerInterface interface {
 	// Update conversation (e.g. title)
 	// (PATCH /v1/conversations/{id})
 	UpdateConversation(w http.ResponseWriter, r *http.Request, id string)
+	// Stream conversation events including sub-agent activity (SSE)
+	// (GET /v1/conversations/{id}/events)
+	StreamConversationEvents(w http.ResponseWriter, r *http.Request, id string)
 	// List messages in a conversation
 	// (GET /v1/conversations/{id}/messages)
 	ListMessages(w http.ResponseWriter, r *http.Request, id string, params ListMessagesParams)
@@ -395,6 +437,12 @@ type ServerInterface interface {
 	// Stream job logs and status updates (SSE)
 	// (GET /v1/jobs/{id}/stream)
 	StreamJob(w http.ResponseWriter, r *http.Request, id string)
+	// List available models (from catalog)
+	// (GET /v1/models)
+	ListModels(w http.ResponseWriter, r *http.Request)
+	// Discover models from Ollama and/or LiteLLM
+	// (POST /v1/models/discover)
+	DiscoverModels(w http.ResponseWriter, r *http.Request)
 	// List all personas
 	// (GET /v1/personas)
 	ListPersonas(w http.ResponseWriter, r *http.Request)
@@ -645,6 +693,31 @@ func (siw *ServerInterfaceWrapper) UpdateConversation(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// StreamConversationEvents operation middleware
+func (siw *ServerInterfaceWrapper) StreamConversationEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StreamConversationEvents(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListMessages operation middleware
 func (siw *ServerInterfaceWrapper) ListMessages(w http.ResponseWriter, r *http.Request) {
 
@@ -784,6 +857,34 @@ func (siw *ServerInterfaceWrapper) StreamJob(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StreamJob(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListModels operation middleware
+func (siw *ServerInterfaceWrapper) ListModels(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListModels(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DiscoverModels operation middleware
+func (siw *ServerInterfaceWrapper) DiscoverModels(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DiscoverModels(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1220,12 +1321,15 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("DELETE "+options.BaseURL+"/v1/conversations/{id}", wrapper.DeleteConversation)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/conversations/{id}", wrapper.GetConversation)
 	m.HandleFunc("PATCH "+options.BaseURL+"/v1/conversations/{id}", wrapper.UpdateConversation)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/conversations/{id}/events", wrapper.StreamConversationEvents)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/conversations/{id}/messages", wrapper.ListMessages)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs", wrapper.ListJobs)
 	m.HandleFunc("POST "+options.BaseURL+"/v1/jobs", wrapper.SubmitJob)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs/{id}", wrapper.GetJob)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs/{id}/files/{filename}", wrapper.ServeJobFile)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs/{id}/stream", wrapper.StreamJob)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/models", wrapper.ListModels)
+	m.HandleFunc("POST "+options.BaseURL+"/v1/models/discover", wrapper.DiscoverModels)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/personas", wrapper.ListPersonas)
 	m.HandleFunc("POST "+options.BaseURL+"/v1/personas", wrapper.CreatePersona)
 	m.HandleFunc("DELETE "+options.BaseURL+"/v1/personas/{id}", wrapper.DeletePersona)
@@ -1439,6 +1543,33 @@ func (response UpdateConversation200JSONResponse) VisitUpdateConversationRespons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type StreamConversationEventsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type StreamConversationEventsResponseObject interface {
+	VisitStreamConversationEventsResponse(w http.ResponseWriter) error
+}
+
+type StreamConversationEvents200TexteventStreamResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response StreamConversationEvents200TexteventStreamResponse) VisitStreamConversationEventsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "text/event-stream")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
 type ListMessagesRequestObject struct {
 	Id     string `json:"id"`
 	Params ListMessagesParams
@@ -1620,6 +1751,39 @@ type StreamJob404Response struct {
 func (response StreamJob404Response) VisitStreamJobResponse(w http.ResponseWriter) error {
 	w.WriteHeader(404)
 	return nil
+}
+
+type ListModelsRequestObject struct {
+}
+
+type ListModelsResponseObject interface {
+	VisitListModelsResponse(w http.ResponseWriter) error
+}
+
+type ListModels200JSONResponse []ModelSpec
+
+func (response ListModels200JSONResponse) VisitListModelsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DiscoverModelsRequestObject struct {
+	Body *DiscoverModelsJSONRequestBody
+}
+
+type DiscoverModelsResponseObject interface {
+	VisitDiscoverModelsResponse(w http.ResponseWriter) error
+}
+
+type DiscoverModels200JSONResponse []ModelSpec
+
+func (response DiscoverModels200JSONResponse) VisitDiscoverModelsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
 }
 
 type ListPersonasRequestObject struct {
@@ -1964,6 +2128,9 @@ type StrictServerInterface interface {
 	// Update conversation (e.g. title)
 	// (PATCH /v1/conversations/{id})
 	UpdateConversation(ctx context.Context, request UpdateConversationRequestObject) (UpdateConversationResponseObject, error)
+	// Stream conversation events including sub-agent activity (SSE)
+	// (GET /v1/conversations/{id}/events)
+	StreamConversationEvents(ctx context.Context, request StreamConversationEventsRequestObject) (StreamConversationEventsResponseObject, error)
 	// List messages in a conversation
 	// (GET /v1/conversations/{id}/messages)
 	ListMessages(ctx context.Context, request ListMessagesRequestObject) (ListMessagesResponseObject, error)
@@ -1982,6 +2149,12 @@ type StrictServerInterface interface {
 	// Stream job logs and status updates (SSE)
 	// (GET /v1/jobs/{id}/stream)
 	StreamJob(ctx context.Context, request StreamJobRequestObject) (StreamJobResponseObject, error)
+	// List available models (from catalog)
+	// (GET /v1/models)
+	ListModels(ctx context.Context, request ListModelsRequestObject) (ListModelsResponseObject, error)
+	// Discover models from Ollama and/or LiteLLM
+	// (POST /v1/models/discover)
+	DiscoverModels(ctx context.Context, request DiscoverModelsRequestObject) (DiscoverModelsResponseObject, error)
 	// List all personas
 	// (GET /v1/personas)
 	ListPersonas(ctx context.Context, request ListPersonasRequestObject) (ListPersonasResponseObject, error)
@@ -2307,6 +2480,32 @@ func (sh *strictHandler) UpdateConversation(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// StreamConversationEvents operation middleware
+func (sh *strictHandler) StreamConversationEvents(w http.ResponseWriter, r *http.Request, id string) {
+	var request StreamConversationEventsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StreamConversationEvents(ctx, request.(StreamConversationEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StreamConversationEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StreamConversationEventsResponseObject); ok {
+		if err := validResponse.VisitStreamConversationEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListMessages operation middleware
 func (sh *strictHandler) ListMessages(w http.ResponseWriter, r *http.Request, id string, params ListMessagesParams) {
 	var request ListMessagesRequestObject
@@ -2461,6 +2660,61 @@ func (sh *strictHandler) StreamJob(w http.ResponseWriter, r *http.Request, id st
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(StreamJobResponseObject); ok {
 		if err := validResponse.VisitStreamJobResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListModels operation middleware
+func (sh *strictHandler) ListModels(w http.ResponseWriter, r *http.Request) {
+	var request ListModelsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListModels(ctx, request.(ListModelsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListModels")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListModelsResponseObject); ok {
+		if err := validResponse.VisitListModelsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DiscoverModels operation middleware
+func (sh *strictHandler) DiscoverModels(w http.ResponseWriter, r *http.Request) {
+	var request DiscoverModelsRequestObject
+
+	var body DiscoverModelsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DiscoverModels(ctx, request.(DiscoverModelsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DiscoverModels")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DiscoverModelsResponseObject); ok {
+		if err := validResponse.VisitDiscoverModelsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -2889,53 +3143,59 @@ func (sh *strictHandler) TestConnection(w http.ResponseWriter, r *http.Request) 
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
+	"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",
+	"Hh4e/hsAAP//v0t56ZtLAAA=",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

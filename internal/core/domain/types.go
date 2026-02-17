@@ -59,5 +59,6 @@ type ImageProvider interface {
 // LLMProvider defines the interface for LLM services
 type LLMProvider interface {
 	GenerateText(ctx context.Context, prompt string) (string, error)
+	// GenerateTextWithModel uses a specific model override. If modelID is empty, uses the default.
+	GenerateTextWithModel(ctx context.Context, prompt string, modelID string) (string, error)
 }
-

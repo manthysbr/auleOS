@@ -9,6 +9,7 @@ export interface Persona {
     icon: string
     color: string
     allowed_tools: string[]
+    model_override?: string
     is_builtin: boolean
     created_at: string
     updated_at: string
@@ -29,6 +30,7 @@ interface PersonaState {
         icon?: string
         color?: string
         allowed_tools?: string[]
+        model_override?: string
     }) => Promise<Persona | null>
     updatePersona: (
         id: string,
@@ -39,6 +41,7 @@ interface PersonaState {
             icon?: string
             color?: string
             allowed_tools?: string[]
+            model_override?: string
         }
     ) => Promise<void>
     deletePersona: (id: string) => Promise<void>

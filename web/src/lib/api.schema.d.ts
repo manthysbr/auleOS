@@ -285,6 +285,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List available models (from catalog) */
+        get: operations["ListModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/models/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discover models from Ollama and/or LiteLLM */
+        post: operations["DiscoverModels"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stream conversation events including sub-agent activity (SSE) */
+        get: operations["StreamConversationEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/personas": {
         parameters: {
             query?: never;
@@ -486,11 +537,41 @@ export interface components {
             color?: string;
             /** @description Tool names this persona can use. Empty means all tools. */
             allowed_tools?: string[];
+            /** @description Model to use for this persona. Empty means use system default. */
+            model_override?: string;
             is_builtin?: boolean;
             /** Format: date-time */
             created_at?: string;
             /** Format: date-time */
             updated_at?: string;
+        };
+        ModelSpec: {
+            /** @example qwen2.5:3b */
+            id?: string;
+            /** @example Qwen 2.5 3B */
+            name?: string;
+            /** @example ollama */
+            provider?: string;
+            /** @enum {string} */
+            role?: "general" | "code" | "creative" | "fast";
+            /** @example 3B */
+            size?: string;
+            base_url?: string;
+            is_local?: boolean;
+        };
+        SubAgentEvent: {
+            sub_agent_id?: string;
+            parent_id?: string;
+            conversation_id?: string;
+            persona_name?: string;
+            persona_color?: string;
+            persona_icon?: string;
+            model_id?: string;
+            /** @enum {string} */
+            status?: "pending" | "running" | "done" | "failed";
+            thought?: string;
+            result?: string;
+            error?: string;
         };
     };
     responses: never;
@@ -1211,6 +1292,78 @@ export interface operations {
             };
         };
     };
+    ListModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of available models */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSpec"][];
+                };
+            };
+        };
+    };
+    DiscoverModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @example http://localhost:11434 */
+                    ollama_url?: string;
+                    /** @example http://localhost:4000 */
+                    litellm_url?: string;
+                    litellm_api_key?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Discovered models */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSpec"][];
+                };
+            };
+        };
+    };
+    StreamConversationEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Event stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+        };
+    };
     ListPersonas: {
         parameters: {
             query?: never;
@@ -1252,6 +1405,8 @@ export interface operations {
                     /** @example cyan */
                     color?: string;
                     allowed_tools?: string[];
+                    /** @description Override model for this persona (e.g. qwen2.5-coder:3b) */
+                    model_override?: string;
                 };
             };
         };
@@ -1343,6 +1498,7 @@ export interface operations {
                     icon?: string;
                     color?: string;
                     allowed_tools?: string[];
+                    model_override?: string;
                 };
             };
         };
