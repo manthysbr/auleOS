@@ -5,7 +5,7 @@ import { api as client } from "@/lib/api"
 import { useConversationStore, type Message } from "@/store/conversations"
 import { usePersonaStore } from "@/store/personas"
 import { useSubAgentStore } from "@/store/subagents"
-import { useSubAgentStream, type SubAgentEvent } from "@/hooks/useSubAgentStream"
+import { useSubAgentStream, type SubAgentEvent, type AsyncMessageEvent } from "@/hooks/useSubAgentStream"
 import { SubAgentTree } from "./SubAgentCard"
 
 // ── Tool color mapping for distinct visual badges ─────────────────
@@ -132,12 +132,28 @@ export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
     const { activePersonaId } = usePersonaStore()
     const { agents, processEvent, clear: clearSubAgents } = useSubAgentStore()
 
-    // SSE connection for sub-agent events
+    // SSE connection for sub-agent events AND async job results
     const handleSubAgentEvent = useCallback(
         (evt: SubAgentEvent) => processEvent(evt),
         [processEvent]
     )
-    useSubAgentStream(activeConversationId, handleSubAgentEvent)
+    const handleAsyncMessage = useCallback(
+        (evt: AsyncMessageEvent) => {
+            // Push async job result as a new message into the conversation
+            const msg: Message = {
+                id: evt.id,
+                conversation_id: evt.conversation_id,
+                role: "assistant",
+                content: evt.content,
+                created_at: evt.created_at,
+                // Carry image_url for rendering
+                ...(evt.image_url ? { tool_call: { name: "generate_image", args: { url: evt.image_url } } } : {}),
+            }
+            addLocalMessage(msg)
+        },
+        [addLocalMessage]
+    )
+    useSubAgentStream(activeConversationId, handleSubAgentEvent, handleAsyncMessage)
 
     // Clear sub-agents on conversation switch
     useEffect(() => {
@@ -287,8 +303,11 @@ export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
                                 )}
                             >
                                 {msg.tool_call?.name === 'generate_image' && msg.tool_call.args?.url ? (
-                                    <div className="rounded-lg overflow-hidden border border-black/10 mt-1">
-                                        <img src={String(msg.tool_call.args.url)} alt="Generated" className="w-full h-auto object-cover" />
+                                    <div className="space-y-2">
+                                        <p className="whitespace-pre-wrap">{msg.content.replace(/!\[.*?\]\(.*?\)/g, '').trim() || 'Here is your generated image:'}</p>
+                                        <div className="rounded-lg overflow-hidden border border-black/10">
+                                            <img src={String(msg.tool_call.args.url)} alt="Generated" className="w-full h-auto object-cover" />
+                                        </div>
                                     </div>
                                 ) : (
                                     <p className="whitespace-pre-wrap">{msg.content}</p>

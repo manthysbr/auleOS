@@ -218,42 +218,39 @@ Previous conversation:
 
 	return fmt.Sprintf(`%s
 
-Use the ReAct (Reasoning + Acting) pattern to solve tasks.
+You use the ReAct pattern: Thought → Action → Observation → ... → Final Answer.
 
-IMPORTANT FORMAT:
-Thought: [your reasoning about what to do next]
-Action: [tool name]
-Action Input: [JSON object with tool parameters]
+FORMAT (tool call):
+Thought: <reasoning>
+Action: <tool_name>
+Action Input: <JSON params>
 
-After receiving an Observation, continue thinking or provide Final Answer.
+FORMAT (direct answer):
+Thought: <reasoning>
+Final Answer: <response>
 
 %s
 
 RULES:
 1. Always start with "Thought:"
-2. Use "Action:" for tool name only
-3. Use "Action Input:" with valid JSON
-4. When done, use "Final Answer:" instead of Action
-5. For simple questions, greetings, or conversations that do NOT require tools, skip Action and go directly to "Final Answer:"
-6. Only use tools when the user explicitly asks for something that requires them (image generation, delegation, etc.)
+2. For simple chat (greetings, questions, conversation), go DIRECTLY to "Final Answer:" — no tools needed.
+3. Only use tools when the user explicitly asks for something requiring them.
+4. Tools generate_image and generate_text are ASYNC. When "status":"queued", tell user to wait.
+5. When "status":"unavailable", the service is down — tell user clearly.
+6. Action Input must be valid JSON on one line.
 
-Example (simple chat — NO tool needed):
-User: Hello, how are you?
-Thought: This is a simple greeting, I can answer directly without any tools.
-Final Answer: Hello! I'm doing well, how can I help you today?
+Example 1 — simple chat:
+User: Hello!
+Thought: Simple greeting, no tool needed.
+Final Answer: Hello! How can I help you today?
 
-Example (tool needed):
+Example 2 — image generation:
 User: Generate an image of a sunset
-Thought: I need to create an image using the generate_image tool
+Thought: I need to use generate_image for this request.
 Action: generate_image
 Action Input: {"prompt": "beautiful sunset over ocean"}
-
-[System provides Observation]
-
-Thought: I have successfully generated the image
-Final Answer: Here's your sunset image: [observation shows URL]
 %s
-Now respond to this request:
+Now respond to:
 User: %s`, systemIdentity, toolsDesc, historyBlock, userMessage)
 }
 
@@ -262,7 +259,7 @@ func (s *ReActAgentService) parseReActOutput(response string) domain.ReActStep {
 	step := domain.ReActStep{}
 
 	// Check for Final Answer first
-	finalAnswerRe := regexp.MustCompile(`(?i)Final Answer:\s*(.*)`)
+	finalAnswerRe := regexp.MustCompile(`(?is)Final\s*Answer:\s*(.*)`)
 	if matches := finalAnswerRe.FindStringSubmatch(response); len(matches) > 1 {
 		step.IsFinalAnswer = true
 		step.FinalAnswer = strings.TrimSpace(matches[1])
@@ -288,18 +285,75 @@ func (s *ReActAgentService) parseReActOutput(response string) domain.ReActStep {
 		step.Action = strings.TrimSpace(matches[1])
 	}
 
-	// Extract Action Input (JSON)
-	actionInputRe := regexp.MustCompile(`(?i)Action Input:\s*(\{[^}]*\})`)
-	if matches := actionInputRe.FindStringSubmatch(response); len(matches) > 1 {
-		jsonStr := strings.TrimSpace(matches[1])
-		var params map[string]interface{}
-		if err := json.Unmarshal([]byte(jsonStr), &params); err == nil {
-			step.ActionInput = params
-		} else {
-			s.logger.Warn("failed to parse action input JSON", "error", err, "json", jsonStr)
-			step.ActionInput = map[string]interface{}{"raw": jsonStr}
+	// Extract Action Input — use brace-matching for nested JSON
+	step.ActionInput = s.extractActionInput(response)
+
+	return step
+}
+
+// extractActionInput extracts the JSON object from "Action Input: {...}" using brace-depth counting
+// to handle nested JSON objects correctly.
+func (s *ReActAgentService) extractActionInput(response string) map[string]interface{} {
+	// Find "Action Input:" prefix (case-insensitive)
+	aiRe := regexp.MustCompile(`(?i)Action\s*Input:\s*`)
+	loc := aiRe.FindStringIndex(response)
+	if loc == nil {
+		return nil
+	}
+
+	// Find the first '{' after the prefix
+	rest := response[loc[1]:]
+	start := strings.Index(rest, "{")
+	if start < 0 {
+		return nil
+	}
+
+	// Count braces to find matching '}'
+	depth := 0
+	inStr := false
+	escaped := false
+	for i := start; i < len(rest); i++ {
+		ch := rest[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' && inStr {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			inStr = !inStr
+			continue
+		}
+		if inStr {
+			continue
+		}
+		if ch == '{' {
+			depth++
+		} else if ch == '}' {
+			depth--
+			if depth == 0 {
+				jsonStr := rest[start : i+1]
+				var params map[string]interface{}
+				if parseErr := json.Unmarshal([]byte(jsonStr), &params); parseErr == nil {
+					return params
+				} else {
+					s.logger.Warn("failed to parse action input JSON", "error", parseErr, "json", jsonStr)
+					return map[string]interface{}{"raw": jsonStr}
+				}
+			}
 		}
 	}
 
-	return step
+	// Fallback: try a simple regex as last resort
+	simpleRe := regexp.MustCompile(`\{[^}]+\}`)
+	if match := simpleRe.FindString(rest); match != "" {
+		var params map[string]interface{}
+		if err := json.Unmarshal([]byte(match), &params); err == nil {
+			return params
+		}
+	}
+
+	return nil
 }

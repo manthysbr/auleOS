@@ -8,3 +8,11 @@ aule-kernel
 
 # IDE
 .vscode/
+aule.db.wal
+aule-dev.db.wal
+dev.sh
+CONTEXT.md
+go.mod
+go.sum
+MILESTONES.md
+MILESTONES.md.bak

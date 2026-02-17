@@ -14,13 +14,24 @@ export type SubAgentEvent = {
     error?: string
 }
 
+export type AsyncMessageEvent = {
+    id: string
+    conversation_id: string
+    role: string
+    content: string
+    job_id?: string
+    image_url?: string
+    created_at: string
+}
+
 /**
  * useSubAgentStream — connects to /v1/conversations/{id}/events SSE endpoint
  * and collects sub-agent events in real-time. Returns a Map keyed by sub_agent_id.
  */
 export function useSubAgentStream(
     conversationId: string | null,
-    onEvent?: (event: SubAgentEvent) => void
+    onEvent?: (event: SubAgentEvent) => void,
+    onMessage?: (event: AsyncMessageEvent) => void
 ) {
     const eventSourceRef = useRef<EventSource | null>(null)
 
@@ -46,11 +57,19 @@ export function useSubAgentStream(
             }
         })
 
+        es.addEventListener("new_message", (event: MessageEvent) => {
+            try {
+                const data = JSON.parse(event.data) as AsyncMessageEvent
+                onMessage?.(data)
+            } catch {
+                console.warn("Failed to parse new_message event:", event.data)
+            }
+        })
+
         es.onerror = () => {
-            // SSE auto-reconnects; we just log
             console.debug("SSE connection error, will retry...")
         }
-    }, [conversationId, onEvent])
+    }, [conversationId, onEvent, onMessage])
 
     useEffect(() => {
         connect()

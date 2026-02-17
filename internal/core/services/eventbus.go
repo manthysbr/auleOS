@@ -8,9 +8,10 @@ import (
 type EventType string
 
 const (
-	EventTypeStatus   EventType = "status"
-	EventTypeLog      EventType = "log"
-	EventTypeSubAgent EventType = "sub_agent"
+	EventTypeStatus     EventType = "status"
+	EventTypeLog        EventType = "log"
+	EventTypeSubAgent   EventType = "sub_agent"
+	EventTypeNewMessage EventType = "new_message"
 )
 
 type Event struct {

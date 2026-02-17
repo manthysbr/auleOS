@@ -11,7 +11,7 @@ import (
 func NewGenerateImageTool(lifecycle *WorkerLifecycle) *domain.Tool {
 	return &domain.Tool{
 		Name:        "generate_image",
-		Description: "Queues an image generation job using ComfyUI and returns the job id",
+		Description: "Queues an image generation job using ComfyUI and returns the job id. The result will be delivered asynchronously to the conversation.",
 		Parameters: domain.ToolParameters{
 			Type: "object",
 			Properties: map[string]interface{}{
@@ -23,7 +23,6 @@ func NewGenerateImageTool(lifecycle *WorkerLifecycle) *domain.Tool {
 			Required: []string{"prompt"},
 		},
 		Execute: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-			// Extract prompt
 			promptRaw, ok := params["prompt"]
 			if !ok {
 				return nil, fmt.Errorf("missing required parameter: prompt")
@@ -37,15 +36,28 @@ func NewGenerateImageTool(lifecycle *WorkerLifecycle) *domain.Tool {
 				return nil, fmt.Errorf("worker lifecycle is not configured")
 			}
 
-			jobID, err := lifecycle.SubmitImageJob(ctx, prompt)
+			// Quick health check: is the image provider reachable?
+			if err := lifecycle.TestImageProvider(ctx); err != nil {
+				return map[string]interface{}{
+					"status":  "unavailable",
+					"error":   fmt.Sprintf("Image generation service is not available: %v", err),
+					"message": "The image generation backend (ComfyUI) is not running. Please start it or configure a remote provider in Settings.",
+				}, nil
+			}
+
+			// Extract conversation ID so the job result can be pushed back to the chat
+			convID, _ := ctx.Value(ctxKeyConversationID).(domain.ConversationID)
+
+			jobID, err := lifecycle.SubmitImageJobWithConv(ctx, prompt, string(convID))
 			if err != nil {
 				return nil, fmt.Errorf("failed to queue image job: %w", err)
 			}
 
 			return map[string]interface{}{
-				"status": "queued",
-				"job_id": string(jobID),
-				"prompt": prompt,
+				"status":  "queued",
+				"job_id":  string(jobID),
+				"prompt":  prompt,
+				"message": "Image is being generated asynchronously. The result will appear in this chat when ready.",
 			}, nil
 		},
 	}
@@ -55,7 +67,7 @@ func NewGenerateImageTool(lifecycle *WorkerLifecycle) *domain.Tool {
 func NewGenerateTextTool(lifecycle *WorkerLifecycle) *domain.Tool {
 	return &domain.Tool{
 		Name:        "generate_text",
-		Description: "Queues a text generation job and returns the job id",
+		Description: "Queues a text generation job and returns the job id. The result will be delivered asynchronously to the conversation.",
 		Parameters: domain.ToolParameters{
 			Type: "object",
 			Properties: map[string]interface{}{
@@ -80,15 +92,19 @@ func NewGenerateTextTool(lifecycle *WorkerLifecycle) *domain.Tool {
 				return nil, fmt.Errorf("worker lifecycle is not configured")
 			}
 
-			jobID, err := lifecycle.SubmitTextJob(ctx, prompt)
+			// Extract conversation ID so the job result can be pushed back to the chat
+			convID, _ := ctx.Value(ctxKeyConversationID).(domain.ConversationID)
+
+			jobID, err := lifecycle.SubmitTextJobWithConv(ctx, prompt, string(convID))
 			if err != nil {
 				return nil, fmt.Errorf("failed to queue text job: %w", err)
 			}
 
 			return map[string]interface{}{
-				"status": "queued",
-				"job_id": string(jobID),
-				"prompt": prompt,
+				"status":  "queued",
+				"job_id":  string(jobID),
+				"prompt":  prompt,
+				"message": "Text is being generated asynchronously. The result will appear in this chat when ready.",
 			}, nil
 		},
 	}

@@ -35,6 +35,7 @@ type WorkerLifecycle struct {
 	eventBus  *EventBus
 	llm       domain.LLMProvider
 	image     domain.ImageProvider
+	convStore *ConversationStore // optional: enables async job → chat push
 	publicURL string
 
 	handlerMu          sync.RWMutex
@@ -324,6 +325,9 @@ func (s *WorkerLifecycle) executeImageJob(ctx context.Context, job domain.Job) {
 	progressDone := 100
 	s.publishStatusWithProgress(string(job.ID), string(domain.JobStatusCompleted), &progressDone)
 	s.publishLog(string(job.ID), fmt.Sprintf("image saved: %s", resultPath))
+
+	// Push result back into the originating conversation
+	s.notifyConversation(ctx, job, fmt.Sprintf("Here is your generated image:\n\n![Generated Image](%s)", servedURL), &servedURL)
 }
 
 func (s *WorkerLifecycle) executeTextJob(ctx context.Context, job domain.Job) {
@@ -388,6 +392,9 @@ func (s *WorkerLifecycle) executeTextJob(ctx context.Context, job domain.Job) {
 	progressDone := 100
 	s.publishStatusWithProgress(string(job.ID), string(domain.JobStatusCompleted), &progressDone)
 	s.publishLog(string(job.ID), fmt.Sprintf("text saved: %s", resultPath))
+
+	// Push result back into the originating conversation
+	s.notifyConversation(ctx, job, fmt.Sprintf("Here is the generated text:\n\n%s", resultText), nil)
 }
 
 func (s *WorkerLifecycle) failJob(ctx context.Context, job domain.Job, err error) {
@@ -401,6 +408,62 @@ func (s *WorkerLifecycle) failJob(ctx context.Context, job domain.Job, err error
 	if err := s.repo.SaveJob(ctx, job); err != nil {
 		s.logger.Error("failed to save job status", "error", err)
 	}
+
+	// Notify conversation about the failure too
+	s.notifyConversation(ctx, job, fmt.Sprintf("Job failed: %s", msg), nil)
+}
+
+// notifyConversation pushes a result message back into the originating conversation
+// when a job completes. This enables async tool results to appear in the chat.
+func (s *WorkerLifecycle) notifyConversation(ctx context.Context, job domain.Job, content string, imageURL *string) {
+	if job.Metadata == nil {
+		return
+	}
+	convID := strings.TrimSpace(job.Metadata["conversation_id"])
+	if convID == "" {
+		return
+	}
+
+	msgID := domain.NewMessageID()
+	now := time.Now()
+
+	// Persist the assistant message into the conversation
+	if s.convStore != nil {
+		msg := domain.Message{
+			ID:             msgID,
+			ConversationID: domain.ConversationID(convID),
+			Role:           domain.RoleAssistant,
+			Content:        content,
+			CreatedAt:      now,
+		}
+		if err := s.convStore.AddMessage(ctx, msg); err != nil {
+			s.logger.Error("failed to persist job result message", "job_id", job.ID, "conv_id", convID, "error", err)
+		}
+	}
+
+	// Build SSE payload — includes enough data for the frontend to render immediately
+	payload := map[string]interface{}{
+		"id":              string(msgID),
+		"conversation_id": convID,
+		"role":            "assistant",
+		"content":         content,
+		"job_id":          string(job.ID),
+		"created_at":      now.Format(time.RFC3339),
+	}
+	if imageURL != nil {
+		payload["image_url"] = *imageURL
+	}
+	payloadJSON, _ := json.Marshal(payload)
+
+	// Publish on the conversation channel so the SSE handler picks it up
+	s.eventBus.Publish(Event{
+		JobID:     convID, // EventBus key = conversation ID
+		Type:      EventTypeNewMessage,
+		Data:      string(payloadJSON),
+		Timestamp: now.Unix(),
+	})
+
+	s.logger.Info("job result pushed to conversation", "job_id", job.ID, "conv_id", convID)
 }
 
 // SubmitJob creates a job record and submits it
@@ -427,6 +490,12 @@ func (s *WorkerLifecycle) SubmitJob(ctx context.Context, spec domain.WorkerSpec)
 
 // SubmitImageJob creates a queued image job and delegates execution to scheduler/lifecycle.
 func (s *WorkerLifecycle) SubmitImageJob(ctx context.Context, prompt string) (domain.JobID, error) {
+	return s.SubmitImageJobWithConv(ctx, prompt, "")
+}
+
+// SubmitImageJobWithConv creates a queued image job with an optional conversation_id
+// so the result can be pushed back into the originating chat.
+func (s *WorkerLifecycle) SubmitImageJobWithConv(ctx context.Context, prompt string, convID string) (domain.JobID, error) {
 	id := domain.JobID(uuid.New().String())
 	now := time.Now()
 
@@ -441,10 +510,11 @@ func (s *WorkerLifecycle) SubmitImageJob(ctx context.Context, prompt string) (do
 		CreatedAt: now,
 		UpdatedAt: now,
 		Metadata: map[string]string{
-			"capability": CapabilityImageGenerate,
-			"tool":       "generate_image",
-			"prompt":     prompt,
-			"attempt":    "1",
+			"capability":      CapabilityImageGenerate,
+			"tool":            "generate_image",
+			"prompt":          prompt,
+			"attempt":         "1",
+			"conversation_id": convID,
 		},
 	}
 
@@ -464,6 +534,12 @@ func (s *WorkerLifecycle) SubmitImageJob(ctx context.Context, prompt string) (do
 
 // SubmitTextJob creates a queued text generation job and delegates execution to scheduler/lifecycle.
 func (s *WorkerLifecycle) SubmitTextJob(ctx context.Context, prompt string) (domain.JobID, error) {
+	return s.SubmitTextJobWithConv(ctx, prompt, "")
+}
+
+// SubmitTextJobWithConv creates a queued text job with an optional conversation_id
+// so the result can be pushed back into the originating chat.
+func (s *WorkerLifecycle) SubmitTextJobWithConv(ctx context.Context, prompt string, convID string) (domain.JobID, error) {
 	id := domain.JobID(uuid.New().String())
 	now := time.Now()
 
@@ -478,10 +554,11 @@ func (s *WorkerLifecycle) SubmitTextJob(ctx context.Context, prompt string) (dom
 		CreatedAt: now,
 		UpdatedAt: now,
 		Metadata: map[string]string{
-			"capability": CapabilityTextGenerate,
-			"tool":       "generate_text",
-			"prompt":     prompt,
-			"attempt":    "1",
+			"capability":      CapabilityTextGenerate,
+			"tool":            "generate_text",
+			"prompt":          prompt,
+			"attempt":         "1",
+			"conversation_id": convID,
 		},
 	}
 
@@ -551,7 +628,40 @@ func (wl *WorkerLifecycle) UpdateProviders(llm domain.LLMProvider, img domain.Im
 	wl.logger.Info("providers hot-reloaded")
 }
 
+// SetConversationStore wires the conversation store so completed jobs
+// can push result messages back into the originating chat.
+func (wl *WorkerLifecycle) SetConversationStore(cs *ConversationStore) {
+	wl.convStore = cs
+}
+
 // TestLLM sends a minimal request to verify LLM connectivity.
 func (wl *WorkerLifecycle) TestLLM(ctx context.Context) (string, error) {
 	return wl.llm.GenerateText(ctx, "Reply with exactly: ok")
+}
+
+// TestImageProvider performs a quick connectivity check on the image backend.
+// Returns nil if reachable, error otherwise. Does NOT generate an image.
+func (wl *WorkerLifecycle) TestImageProvider(ctx context.Context) error {
+	if wl.image == nil {
+		return fmt.Errorf("no image provider configured")
+	}
+	// Try a simple TCP-level check by using the image provider's host
+	// We'll try a tiny HTTP HEAD to the comfyui/remote endpoint
+	// For ComfyUI: GET / returns HTML; for remote APIs: health endpoint
+	// Quick approach: attempt to generate with an empty prompt will fail fast
+	// but that's heavy. Instead, check if the provider struct has a known host.
+	//
+	// Simplest: try a 2-second timeout HEAD request to the configured host
+	client := &http.Client{Timeout: 2 * time.Second}
+	// Detect provider type by checking the configured URL
+	comfyHost := os.Getenv("COMFYUI_HOST")
+	if comfyHost == "" {
+		comfyHost = "http://localhost:8188"
+	}
+	resp, err := client.Head(comfyHost)
+	if err != nil {
+		return fmt.Errorf("image backend unreachable at %s: %w", comfyHost, err)
+	}
+	resp.Body.Close()
+	return nil
 }

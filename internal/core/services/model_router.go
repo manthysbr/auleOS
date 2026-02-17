@@ -33,9 +33,9 @@ func NewModelRouter(logger *slog.Logger, provider domain.LLMProvider) *ModelRout
 		logger:   logger,
 		provider: provider,
 		roleDefaults: map[domain.ModelRole]string{
-			domain.ModelRoleGeneral:  "llama3.2:latest",
-			domain.ModelRoleCode:     "llama3.2:latest",
-			domain.ModelRoleCreative: "llama3.2:latest",
+			domain.ModelRoleGeneral:  "qwen2.5:latest",
+			domain.ModelRoleCode:     "qwen2.5:latest",
+			domain.ModelRoleCreative: "qwen2.5:latest",
 			domain.ModelRoleFast:     "llama3.2:latest",
 		},
 		catalog: domain.RecommendedLocalModels(),

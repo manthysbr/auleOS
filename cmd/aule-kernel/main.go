@@ -127,6 +127,9 @@ func run(logger *slog.Logger) error {
 	// Conversation Store - in-memory cache backed by DuckDB (64 conversations cached)
 	convStore := services.NewConversationStore(repo, 64)
 
+	// Wire conversation store into lifecycle for async job → chat notifications
+	lifecycle.SetConversationStore(convStore)
+
 	// Model Router - resolves which model to use per persona/role
 	modelRouter := services.NewModelRouter(logger, llmProvider)
 
@@ -173,7 +176,7 @@ func run(logger *slog.Logger) error {
 	// Setup HTTP Server
 	// CORS Configuration
 	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173"},
+		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:5174"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"*"},
 		AllowCredentials: true,

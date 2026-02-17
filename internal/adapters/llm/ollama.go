@@ -26,7 +26,7 @@ func NewOllamaProvider(baseURL string) *OllamaProvider {
 	}
 	return &OllamaProvider{
 		baseURL: baseURL,
-		client:  &http.Client{Timeout: 60 * time.Second},
+		client:  &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
@@ -79,7 +79,7 @@ func (p *OllamaProvider) Generate(ctx context.Context, prompt string, model stri
 
 // GenerateText implements domain.LLMProvider interface using the default model
 func (p *OllamaProvider) GenerateText(ctx context.Context, prompt string) (string, error) {
-	return p.Generate(ctx, prompt, "llama3.2:latest")
+	return p.Generate(ctx, prompt, "qwen2.5:latest")
 }
 
 // GenerateTextWithModel implements domain.LLMProvider — uses a specific model, falls back to default if empty
