@@ -13,19 +13,21 @@ import (
 	"github.com/manthysbr/auleOS/internal/config"
 	"github.com/manthysbr/auleOS/internal/core/domain"
 	"github.com/manthysbr/auleOS/internal/core/services"
+	"github.com/manthysbr/auleOS/internal/synapse"
 )
 
 type Server struct {
-	logger       *slog.Logger
-	lifecycle    *services.WorkerLifecycle
-	reactAgent   *services.ReActAgentService
-	agentService *services.AgentService
-	eventBus     *services.EventBus
-	settings     *config.SettingsStore
-	convStore    *services.ConversationStore
-	modelRouter  *services.ModelRouter
-	discovery    *services.ModelDiscovery
-	workerMgr    interface {
+	logger      *slog.Logger
+	lifecycle   *services.WorkerLifecycle
+	reactAgent  *services.ReActAgentService
+	eventBus    *services.EventBus
+	settings    *config.SettingsStore
+	convStore   *services.ConversationStore
+	modelRouter *services.ModelRouter
+	discovery   *services.ModelDiscovery
+	capRouter   *services.CapabilityRouter
+	synapseRT   *synapse.Runtime
+	workerMgr   interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	}
 	repo interface {
@@ -60,12 +62,13 @@ func NewServer(
 	logger *slog.Logger,
 	lifecycle *services.WorkerLifecycle,
 	reactAgent *services.ReActAgentService,
-	agentService *services.AgentService,
 	eventBus *services.EventBus,
 	settings *config.SettingsStore,
 	convStore *services.ConversationStore,
 	modelRouter *services.ModelRouter,
 	discovery *services.ModelDiscovery,
+	capRouter *services.CapabilityRouter,
+	synapseRT *synapse.Runtime,
 	workerMgr interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	},
@@ -90,17 +93,18 @@ func NewServer(
 		DeletePersona(ctx context.Context, id domain.PersonaID) error
 	}) *Server {
 	return &Server{
-		logger:       logger,
-		lifecycle:    lifecycle,
-		reactAgent:   reactAgent,
-		agentService: agentService,
-		eventBus:     eventBus,
-		settings:     settings,
-		convStore:    convStore,
-		modelRouter:  modelRouter,
-		discovery:    discovery,
-		workerMgr:    workerMgr,
-		repo:         repo,
+		logger:      logger,
+		lifecycle:   lifecycle,
+		reactAgent:  reactAgent,
+		eventBus:    eventBus,
+		settings:    settings,
+		convStore:   convStore,
+		modelRouter: modelRouter,
+		discovery:   discovery,
+		capRouter:   capRouter,
+		synapseRT:   synapseRT,
+		workerMgr:   workerMgr,
+		repo:        repo,
 	}
 }
 
@@ -119,6 +123,15 @@ func (s *Server) Handler() http.Handler {
 		// Intercept SSE endpoint for conversation events
 		if r.Method == "GET" && isConversationEventsPath(r.URL.Path) {
 			s.handleConversationSSE(w, r)
+			return
+		}
+		// Plugin management endpoints
+		if r.URL.Path == "/v1/plugins" && r.Method == "GET" {
+			s.handleListPlugins(w, r)
+			return
+		}
+		if r.URL.Path == "/v1/capabilities" && r.Method == "GET" {
+			s.handleListCapabilities(w, r)
 			return
 		}
 		mux.ServeHTTP(w, r)
@@ -310,10 +323,6 @@ func (s *Server) ListJobs(ctx context.Context, request ListJobsRequestObject) (L
 // AgentChat implements StrictServerInterface
 func (s *Server) AgentChat(ctx context.Context, request AgentChatRequestObject) (AgentChatResponseObject, error) {
 	msg := request.Body.Message
-	model := "llama3"
-	if request.Body.Model != nil {
-		model = *request.Body.Model
-	}
 
 	var convID domain.ConversationID
 	if request.Body.ConversationId != nil {
@@ -400,28 +409,6 @@ func (s *Server) AgentChat(ctx context.Context, request AgentChatRequestObject) 
 				}
 			}
 		}
-	} else if s.agentService != nil {
-		resp, err := s.agentService.Chat(ctx, msg, model)
-		if err != nil {
-			s.logger.Error("agent chat failed", "error", err)
-			errMsg := err.Error()
-			return AgentChat500JSONResponse{Error: &errMsg}, nil
-		}
-
-		response = resp.Response
-		thought = resp.Thought
-
-		if resp.ToolCall != nil {
-			name := resp.ToolCall.Name
-			args := resp.ToolCall.Args
-			toolCall = &struct {
-				Args *map[string]interface{} `json:"args,omitempty"`
-				Name *string                 `json:"name,omitempty"`
-			}{
-				Name: &name,
-				Args: &args,
-			}
-		}
 	} else {
 		errMsg := "no agent service configured"
 		return AgentChat500JSONResponse{Error: &errMsg}, nil
@@ -462,4 +449,80 @@ func (s *Server) ServeJobFile(ctx context.Context, request ServeJobFileRequestOb
 		Body:          file,
 		ContentLength: stat.Size(),
 	}, nil
+}
+
+// handleListPlugins returns the list of loaded Synapse (Wasm) plugins.
+// GET /v1/plugins
+func (s *Server) handleListPlugins(w http.ResponseWriter, r *http.Request) {
+	type pluginInfo struct {
+		Name        string `json:"name"`
+		Version     string `json:"version"`
+		Description string `json:"description"`
+		ToolName    string `json:"tool_name"`
+		Runtime     string `json:"runtime"`
+	}
+
+	var plugins []pluginInfo
+
+	if s.synapseRT != nil {
+		for _, name := range s.synapseRT.ListPlugins() {
+			if p, ok := s.synapseRT.GetPlugin(name); ok {
+				meta := p.Meta()
+				plugins = append(plugins, pluginInfo{
+					Name:        meta.Name,
+					Version:     meta.Version,
+					Description: meta.Description,
+					ToolName:    meta.ToolName,
+					Runtime:     "synapse",
+				})
+			}
+		}
+	}
+
+	if plugins == nil {
+		plugins = []pluginInfo{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"plugins": plugins,
+		"count":   len(plugins),
+	})
+}
+
+// handleListCapabilities returns all registered capability routes.
+// GET /v1/capabilities
+func (s *Server) handleListCapabilities(w http.ResponseWriter, r *http.Request) {
+	type capInfo struct {
+		Capability  string `json:"capability"`
+		Runtime     string `json:"runtime"`
+		Description string `json:"description"`
+	}
+
+	var caps []capInfo
+
+	if s.capRouter != nil {
+		for name, route := range s.capRouter.ListRoutes() {
+			caps = append(caps, capInfo{
+				Capability:  name,
+				Runtime:     string(route.Runtime),
+				Description: route.Description,
+			})
+		}
+	}
+
+	if caps == nil {
+		caps = []capInfo{}
+	}
+
+	stats := map[string]int{"total": 0, "muscle": 0, "synapse": 0}
+	if s.capRouter != nil {
+		stats = s.capRouter.Stats()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"capabilities": caps,
+		"stats":        stats,
+	})
 }

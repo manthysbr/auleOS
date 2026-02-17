@@ -13,6 +13,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"path/filepath"
+
 	"github.com/manthysbr/auleOS/internal/adapters/docker"
 	"github.com/manthysbr/auleOS/internal/adapters/duckdb"
 	"github.com/manthysbr/auleOS/internal/adapters/providers"
@@ -20,6 +22,7 @@ import (
 	"github.com/manthysbr/auleOS/internal/core/domain"
 	"github.com/manthysbr/auleOS/internal/core/ports"
 	"github.com/manthysbr/auleOS/internal/core/services"
+	"github.com/manthysbr/auleOS/internal/synapse"
 	"github.com/manthysbr/auleOS/pkg/kernel"
 	"github.com/rs/cors"
 )
@@ -124,6 +127,32 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
+	// Synapse Runtime — lightweight Wasm plugin engine
+	wasmRT, err := synapse.NewRuntime(ctx, logger)
+	if err != nil {
+		return fmt.Errorf("failed to init synapse runtime: %w", err)
+	}
+	defer wasmRT.Close(ctx)
+
+	// Discover and load Wasm plugins from ~/.aule/plugins/
+	homeDir, _ := os.UserHomeDir()
+	pluginDir := filepath.Join(homeDir, ".aule", "plugins")
+	if envDir := os.Getenv("AULE_PLUGIN_DIR"); envDir != "" {
+		pluginDir = envDir
+	}
+	pluginRegistry := synapse.NewRegistry(logger, wasmRT, pluginDir)
+	wasmTools, err := pluginRegistry.DiscoverAndLoad(ctx)
+	if err != nil {
+		logger.Warn("synapse plugin discovery failed (non-fatal)", "error", err)
+	} else if len(wasmTools) > 0 {
+		for _, tool := range wasmTools {
+			if err := toolRegistry.Register(tool); err != nil {
+				logger.Error("failed to register wasm tool", "tool", tool.Name, "error", err)
+			}
+		}
+		logger.Info("synapse plugins loaded", "count", len(wasmTools))
+	}
+
 	// Conversation Store - in-memory cache backed by DuckDB (64 conversations cached)
 	convStore := services.NewConversationStore(repo, 64)
 
@@ -159,9 +188,6 @@ func run(logger *slog.Logger) error {
 	// ReAct Agent Service - agentic reasoning with tools + model routing
 	reactAgent := services.NewReActAgentService(logger, llmProvider, modelRouter, toolRegistry, convStore, repo)
 
-	// Legacy Agent Service (for compatibility)
-	agentService := services.NewAgentService(logger, llmProvider, imageProvider, lifecycle)
-
 	// Seed built-in personas (idempotent — ON CONFLICT DO NOTHING)
 	for _, p := range domain.BuiltinPersonas() {
 		if err := repo.CreatePersona(ctx, p); err != nil {
@@ -170,8 +196,11 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("built-in personas seeded")
 
+	// Capability Router — decides Synapse vs Muscle per capability
+	capRouter := services.NewCapabilityRouter(logger, wasmRT)
+
 	// Initialize Kernel API Server
-	apiServer := kernel.NewServer(logger, lifecycle, reactAgent, agentService, eventBus, settingsStore, convStore, modelRouter, discovery, workerMgr, repo)
+	apiServer := kernel.NewServer(logger, lifecycle, reactAgent, eventBus, settingsStore, convStore, modelRouter, discovery, capRouter, wasmRT, workerMgr, repo)
 
 	// Setup HTTP Server
 	// CORS Configuration

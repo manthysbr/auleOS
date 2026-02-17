@@ -16,3 +16,7 @@ go.mod
 go.sum
 MILESTONES.md
 MILESTONES.md.bak
+docs/architecture/v2-muscle-synapse.md
+genplugin
+go.mod
+go.sum
