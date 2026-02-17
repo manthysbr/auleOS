@@ -34,6 +34,12 @@ const (
 	ArtifactTypeVideo    ArtifactType = "video"
 )
 
+// Defines values for CapabilityRuntime.
+const (
+	Muscle  CapabilityRuntime = "muscle"
+	Synapse CapabilityRuntime = "synapse"
+)
+
 // Defines values for ConnectionTestResultStatus.
 const (
 	ConnectionTestResultStatusError ConnectionTestResultStatus = "error"
@@ -60,6 +66,25 @@ const (
 const (
 	Local  ProviderConfigMode = "local"
 	Remote ProviderConfigMode = "remote"
+)
+
+// Defines values for WorkflowStatus.
+const (
+	WorkflowStatusCancelled WorkflowStatus = "cancelled"
+	WorkflowStatusCompleted WorkflowStatus = "completed"
+	WorkflowStatusFailed    WorkflowStatus = "failed"
+	WorkflowStatusPaused    WorkflowStatus = "paused"
+	WorkflowStatusPending   WorkflowStatus = "pending"
+	WorkflowStatusRunning   WorkflowStatus = "running"
+)
+
+// Defines values for WorkflowStepStatus.
+const (
+	WorkflowStepStatusDone    WorkflowStepStatus = "done"
+	WorkflowStepStatusFailed  WorkflowStepStatus = "failed"
+	WorkflowStepStatusPending WorkflowStepStatus = "pending"
+	WorkflowStepStatusRunning WorkflowStepStatus = "running"
+	WorkflowStepStatusSkipped WorkflowStepStatus = "skipped"
 )
 
 // Defines values for ListArtifactsParamsType.
@@ -103,6 +128,29 @@ type Artifact struct {
 
 // ArtifactType defines model for Artifact.Type.
 type ArtifactType string
+
+// Capability defines model for Capability.
+type Capability struct {
+	Capability  *string            `json:"capability,omitempty"`
+	Description *string            `json:"description,omitempty"`
+	Runtime     *CapabilityRuntime `json:"runtime,omitempty"`
+}
+
+// CapabilityRuntime defines model for Capability.Runtime.
+type CapabilityRuntime string
+
+// CapabilityListResponse defines model for CapabilityListResponse.
+type CapabilityListResponse struct {
+	Capabilities *[]Capability    `json:"capabilities,omitempty"`
+	Stats        *CapabilityStats `json:"stats,omitempty"`
+}
+
+// CapabilityStats defines model for CapabilityStats.
+type CapabilityStats struct {
+	Muscle  *int `json:"muscle,omitempty"`
+	Synapse *int `json:"synapse,omitempty"`
+	Total   *int `json:"total,omitempty"`
+}
 
 // ChatRequest defines model for ChatRequest.
 type ChatRequest struct {
@@ -239,6 +287,21 @@ type Persona struct {
 	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
 }
 
+// Plugin defines model for Plugin.
+type Plugin struct {
+	Description *string `json:"description,omitempty"`
+	Name        *string `json:"name,omitempty"`
+	Runtime     *string `json:"runtime,omitempty"`
+	ToolName    *string `json:"tool_name,omitempty"`
+	Version     *string `json:"version,omitempty"`
+}
+
+// PluginListResponse defines model for PluginListResponse.
+type PluginListResponse struct {
+	Count   *int      `json:"count,omitempty"`
+	Plugins *[]Plugin `json:"plugins,omitempty"`
+}
+
 // Project defines model for Project.
 type Project struct {
 	CreatedAt   *time.Time `json:"created_at,omitempty"`
@@ -278,6 +341,46 @@ type Resources struct {
 	Cpu      *float32 `json:"cpu,omitempty"`
 	MemoryMb *int     `json:"memory_mb,omitempty"`
 }
+
+// Workflow defines model for Workflow.
+type Workflow struct {
+	CompletedAt *time.Time              `json:"completed_at,omitempty"`
+	CreatedAt   *time.Time              `json:"created_at,omitempty"`
+	Description *string                 `json:"description,omitempty"`
+	Error       *string                 `json:"error,omitempty"`
+	Id          *string                 `json:"id,omitempty"`
+	Name        *string                 `json:"name,omitempty"`
+	ProjectId   *string                 `json:"project_id,omitempty"`
+	StartedAt   *time.Time              `json:"started_at,omitempty"`
+	State       *map[string]interface{} `json:"state,omitempty"`
+	Status      *WorkflowStatus         `json:"status,omitempty"`
+	Steps       *[]WorkflowStep         `json:"steps,omitempty"`
+}
+
+// WorkflowStatus defines model for Workflow.Status.
+type WorkflowStatus string
+
+// WorkflowStep defines model for WorkflowStep.
+type WorkflowStep struct {
+	DependsOn *[]string `json:"depends_on,omitempty"`
+	Id        *string   `json:"id,omitempty"`
+	Interrupt *struct {
+		After   *bool   `json:"after,omitempty"`
+		Before  *bool   `json:"before,omitempty"`
+		Message *string `json:"message,omitempty"`
+	} `json:"interrupt,omitempty"`
+	PersonaId *string `json:"persona_id,omitempty"`
+	Prompt    *string `json:"prompt,omitempty"`
+	Result    *struct {
+		Metadata *map[string]interface{} `json:"metadata,omitempty"`
+		Output   *string                 `json:"output,omitempty"`
+	} `json:"result,omitempty"`
+	Status *WorkflowStepStatus `json:"status,omitempty"`
+	Tools  *[]string           `json:"tools,omitempty"`
+}
+
+// WorkflowStepStatus defines model for WorkflowStep.Status.
+type WorkflowStepStatus string
 
 // ListArtifactsParams defines parameters for ListArtifacts.
 type ListArtifactsParams struct {
@@ -354,6 +457,19 @@ type TestConnectionJSONBody struct {
 // TestConnectionJSONBodyProvider defines parameters for TestConnection.
 type TestConnectionJSONBodyProvider string
 
+// CreateWorkflowJSONBody defines parameters for CreateWorkflow.
+type CreateWorkflowJSONBody struct {
+	Description *string        `json:"description,omitempty"`
+	Name        string         `json:"name"`
+	ProjectId   *string        `json:"project_id,omitempty"`
+	Steps       []WorkflowStep `json:"steps"`
+}
+
+// ResumeWorkflowJSONBody defines parameters for ResumeWorkflow.
+type ResumeWorkflowJSONBody struct {
+	StateUpdates *map[string]interface{} `json:"state_updates,omitempty"`
+}
+
 // AgentChatJSONRequestBody defines body for AgentChat for application/json ContentType.
 type AgentChatJSONRequestBody = ChatRequest
 
@@ -387,6 +503,12 @@ type UpdateSettingsJSONRequestBody = AppConfig
 // TestConnectionJSONRequestBody defines body for TestConnection for application/json ContentType.
 type TestConnectionJSONRequestBody TestConnectionJSONBody
 
+// CreateWorkflowJSONRequestBody defines body for CreateWorkflow for application/json ContentType.
+type CreateWorkflowJSONRequestBody CreateWorkflowJSONBody
+
+// ResumeWorkflowJSONRequestBody defines body for ResumeWorkflow for application/json ContentType.
+type ResumeWorkflowJSONRequestBody ResumeWorkflowJSONBody
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Chat with the Agent
@@ -401,6 +523,9 @@ type ServerInterface interface {
 	// Get artifact details
 	// (GET /v1/artifacts/{id})
 	GetArtifact(w http.ResponseWriter, r *http.Request, id string)
+	// List all system capabilities (muscle + synapse)
+	// (GET /v1/capabilities)
+	ListCapabilities(w http.ResponseWriter, r *http.Request)
 	// List all conversations
 	// (GET /v1/conversations)
 	ListConversations(w http.ResponseWriter, r *http.Request)
@@ -458,6 +583,9 @@ type ServerInterface interface {
 	// Update persona
 	// (PATCH /v1/personas/{id})
 	UpdatePersona(w http.ResponseWriter, r *http.Request, id string)
+	// List loaded Synapse plugins
+	// (GET /v1/plugins)
+	ListPlugins(w http.ResponseWriter, r *http.Request)
 	// List all projects
 	// (GET /v1/projects)
 	ListProjects(w http.ResponseWriter, r *http.Request)
@@ -488,6 +616,21 @@ type ServerInterface interface {
 	// Test provider connection
 	// (POST /v1/settings/test)
 	TestConnection(w http.ResponseWriter, r *http.Request)
+	// List all workflows
+	// (GET /v1/workflows)
+	ListWorkflows(w http.ResponseWriter, r *http.Request)
+	// Create a new workflow definition
+	// (POST /v1/workflows)
+	CreateWorkflow(w http.ResponseWriter, r *http.Request)
+	// Get workflow details and status
+	// (GET /v1/workflows/{id})
+	GetWorkflow(w http.ResponseWriter, r *http.Request, id string)
+	// Resume a paused workflow
+	// (POST /v1/workflows/{id}/resume)
+	ResumeWorkflow(w http.ResponseWriter, r *http.Request, id string)
+	// Run a workflow
+	// (POST /v1/workflows/{id}/run)
+	RunWorkflow(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -581,6 +724,20 @@ func (siw *ServerInterfaceWrapper) GetArtifact(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetArtifact(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCapabilities operation middleware
+func (siw *ServerInterfaceWrapper) ListCapabilities(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCapabilities(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -997,6 +1154,20 @@ func (siw *ServerInterfaceWrapper) UpdatePersona(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListPlugins operation middleware
+func (siw *ServerInterfaceWrapper) ListPlugins(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPlugins(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListProjects operation middleware
 func (siw *ServerInterfaceWrapper) ListProjects(w http.ResponseWriter, r *http.Request) {
 
@@ -1192,6 +1363,109 @@ func (siw *ServerInterfaceWrapper) TestConnection(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ListWorkflows operation middleware
+func (siw *ServerInterfaceWrapper) ListWorkflows(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWorkflows(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateWorkflow operation middleware
+func (siw *ServerInterfaceWrapper) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateWorkflow(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetWorkflow operation middleware
+func (siw *ServerInterfaceWrapper) GetWorkflow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWorkflow(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResumeWorkflow operation middleware
+func (siw *ServerInterfaceWrapper) ResumeWorkflow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResumeWorkflow(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunWorkflow operation middleware
+func (siw *ServerInterfaceWrapper) RunWorkflow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunWorkflow(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -1316,6 +1590,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/v1/artifacts", wrapper.ListArtifacts)
 	m.HandleFunc("DELETE "+options.BaseURL+"/v1/artifacts/{id}", wrapper.DeleteArtifact)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/artifacts/{id}", wrapper.GetArtifact)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/capabilities", wrapper.ListCapabilities)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/conversations", wrapper.ListConversations)
 	m.HandleFunc("POST "+options.BaseURL+"/v1/conversations", wrapper.CreateConversation)
 	m.HandleFunc("DELETE "+options.BaseURL+"/v1/conversations/{id}", wrapper.DeleteConversation)
@@ -1335,6 +1610,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("DELETE "+options.BaseURL+"/v1/personas/{id}", wrapper.DeletePersona)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/personas/{id}", wrapper.GetPersona)
 	m.HandleFunc("PATCH "+options.BaseURL+"/v1/personas/{id}", wrapper.UpdatePersona)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/plugins", wrapper.ListPlugins)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/projects", wrapper.ListProjects)
 	m.HandleFunc("POST "+options.BaseURL+"/v1/projects", wrapper.CreateProject)
 	m.HandleFunc("DELETE "+options.BaseURL+"/v1/projects/{id}", wrapper.DeleteProject)
@@ -1345,6 +1621,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/v1/settings", wrapper.GetSettings)
 	m.HandleFunc("PUT "+options.BaseURL+"/v1/settings", wrapper.UpdateSettings)
 	m.HandleFunc("POST "+options.BaseURL+"/v1/settings/test", wrapper.TestConnection)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/workflows", wrapper.ListWorkflows)
+	m.HandleFunc("POST "+options.BaseURL+"/v1/workflows", wrapper.CreateWorkflow)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/workflows/{id}", wrapper.GetWorkflow)
+	m.HandleFunc("POST "+options.BaseURL+"/v1/workflows/{id}/resume", wrapper.ResumeWorkflow)
+	m.HandleFunc("POST "+options.BaseURL+"/v1/workflows/{id}/run", wrapper.RunWorkflow)
 
 	return m
 }
@@ -1438,6 +1719,22 @@ type GetArtifact404JSONResponse Error
 func (response GetArtifact404JSONResponse) VisitGetArtifactResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListCapabilitiesRequestObject struct {
+}
+
+type ListCapabilitiesResponseObject interface {
+	VisitListCapabilitiesResponse(w http.ResponseWriter) error
+}
+
+type ListCapabilities200JSONResponse CapabilityListResponse
+
+func (response ListCapabilities200JSONResponse) VisitListCapabilitiesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -1896,6 +2193,22 @@ func (response UpdatePersona404JSONResponse) VisitUpdatePersonaResponse(w http.R
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ListPluginsRequestObject struct {
+}
+
+type ListPluginsResponseObject interface {
+	VisitListPluginsResponse(w http.ResponseWriter) error
+}
+
+type ListPlugins200JSONResponse PluginListResponse
+
+func (response ListPlugins200JSONResponse) VisitListPluginsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type ListProjectsRequestObject struct {
 }
 
@@ -2099,6 +2412,120 @@ func (response TestConnection200JSONResponse) VisitTestConnectionResponse(w http
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ListWorkflowsRequestObject struct {
+}
+
+type ListWorkflowsResponseObject interface {
+	VisitListWorkflowsResponse(w http.ResponseWriter) error
+}
+
+type ListWorkflows200JSONResponse []Workflow
+
+func (response ListWorkflows200JSONResponse) VisitListWorkflowsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateWorkflowRequestObject struct {
+	Body *CreateWorkflowJSONRequestBody
+}
+
+type CreateWorkflowResponseObject interface {
+	VisitCreateWorkflowResponse(w http.ResponseWriter) error
+}
+
+type CreateWorkflow201JSONResponse Workflow
+
+func (response CreateWorkflow201JSONResponse) VisitCreateWorkflowResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateWorkflow400Response struct {
+}
+
+func (response CreateWorkflow400Response) VisitCreateWorkflowResponse(w http.ResponseWriter) error {
+	w.WriteHeader(400)
+	return nil
+}
+
+type GetWorkflowRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetWorkflowResponseObject interface {
+	VisitGetWorkflowResponse(w http.ResponseWriter) error
+}
+
+type GetWorkflow200JSONResponse Workflow
+
+func (response GetWorkflow200JSONResponse) VisitGetWorkflowResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetWorkflow404Response struct {
+}
+
+func (response GetWorkflow404Response) VisitGetWorkflowResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
+	return nil
+}
+
+type ResumeWorkflowRequestObject struct {
+	Id   string `json:"id"`
+	Body *ResumeWorkflowJSONRequestBody
+}
+
+type ResumeWorkflowResponseObject interface {
+	VisitResumeWorkflowResponse(w http.ResponseWriter) error
+}
+
+type ResumeWorkflow200JSONResponse struct {
+	Status *string `json:"status,omitempty"`
+}
+
+func (response ResumeWorkflow200JSONResponse) VisitResumeWorkflowResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RunWorkflowRequestObject struct {
+	Id string `json:"id"`
+}
+
+type RunWorkflowResponseObject interface {
+	VisitRunWorkflowResponse(w http.ResponseWriter) error
+}
+
+type RunWorkflow200JSONResponse struct {
+	Id     *string `json:"id,omitempty"`
+	Status *string `json:"status,omitempty"`
+}
+
+func (response RunWorkflow200JSONResponse) VisitRunWorkflowResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RunWorkflow404Response struct {
+}
+
+func (response RunWorkflow404Response) VisitRunWorkflowResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
+	return nil
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Chat with the Agent
@@ -2113,6 +2540,9 @@ type StrictServerInterface interface {
 	// Get artifact details
 	// (GET /v1/artifacts/{id})
 	GetArtifact(ctx context.Context, request GetArtifactRequestObject) (GetArtifactResponseObject, error)
+	// List all system capabilities (muscle + synapse)
+	// (GET /v1/capabilities)
+	ListCapabilities(ctx context.Context, request ListCapabilitiesRequestObject) (ListCapabilitiesResponseObject, error)
 	// List all conversations
 	// (GET /v1/conversations)
 	ListConversations(ctx context.Context, request ListConversationsRequestObject) (ListConversationsResponseObject, error)
@@ -2170,6 +2600,9 @@ type StrictServerInterface interface {
 	// Update persona
 	// (PATCH /v1/personas/{id})
 	UpdatePersona(ctx context.Context, request UpdatePersonaRequestObject) (UpdatePersonaResponseObject, error)
+	// List loaded Synapse plugins
+	// (GET /v1/plugins)
+	ListPlugins(ctx context.Context, request ListPluginsRequestObject) (ListPluginsResponseObject, error)
 	// List all projects
 	// (GET /v1/projects)
 	ListProjects(ctx context.Context, request ListProjectsRequestObject) (ListProjectsResponseObject, error)
@@ -2200,6 +2633,21 @@ type StrictServerInterface interface {
 	// Test provider connection
 	// (POST /v1/settings/test)
 	TestConnection(ctx context.Context, request TestConnectionRequestObject) (TestConnectionResponseObject, error)
+	// List all workflows
+	// (GET /v1/workflows)
+	ListWorkflows(ctx context.Context, request ListWorkflowsRequestObject) (ListWorkflowsResponseObject, error)
+	// Create a new workflow definition
+	// (POST /v1/workflows)
+	CreateWorkflow(ctx context.Context, request CreateWorkflowRequestObject) (CreateWorkflowResponseObject, error)
+	// Get workflow details and status
+	// (GET /v1/workflows/{id})
+	GetWorkflow(ctx context.Context, request GetWorkflowRequestObject) (GetWorkflowResponseObject, error)
+	// Resume a paused workflow
+	// (POST /v1/workflows/{id}/resume)
+	ResumeWorkflow(ctx context.Context, request ResumeWorkflowRequestObject) (ResumeWorkflowResponseObject, error)
+	// Run a workflow
+	// (POST /v1/workflows/{id}/run)
+	RunWorkflow(ctx context.Context, request RunWorkflowRequestObject) (RunWorkflowResponseObject, error)
 }
 
 type StrictHandlerFunc = strictnethttp.StrictHTTPHandlerFunc
@@ -2333,6 +2781,30 @@ func (sh *strictHandler) GetArtifact(w http.ResponseWriter, r *http.Request, id 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetArtifactResponseObject); ok {
 		if err := validResponse.VisitGetArtifactResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListCapabilities operation middleware
+func (sh *strictHandler) ListCapabilities(w http.ResponseWriter, r *http.Request) {
+	var request ListCapabilitiesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListCapabilities(ctx, request.(ListCapabilitiesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListCapabilities")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListCapabilitiesResponseObject); ok {
+		if err := validResponse.VisitListCapabilitiesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -2862,6 +3334,30 @@ func (sh *strictHandler) UpdatePersona(w http.ResponseWriter, r *http.Request, i
 	}
 }
 
+// ListPlugins operation middleware
+func (sh *strictHandler) ListPlugins(w http.ResponseWriter, r *http.Request) {
+	var request ListPluginsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPlugins(ctx, request.(ListPluginsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPlugins")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPluginsResponseObject); ok {
+		if err := validResponse.VisitListPluginsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListProjects operation middleware
 func (sh *strictHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	var request ListProjectsRequestObject
@@ -3140,62 +3636,212 @@ func (sh *strictHandler) TestConnection(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// ListWorkflows operation middleware
+func (sh *strictHandler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
+	var request ListWorkflowsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWorkflows(ctx, request.(ListWorkflowsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWorkflows")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWorkflowsResponseObject); ok {
+		if err := validResponse.VisitListWorkflowsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateWorkflow operation middleware
+func (sh *strictHandler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
+	var request CreateWorkflowRequestObject
+
+	var body CreateWorkflowJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateWorkflow(ctx, request.(CreateWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateWorkflow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateWorkflowResponseObject); ok {
+		if err := validResponse.VisitCreateWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetWorkflow operation middleware
+func (sh *strictHandler) GetWorkflow(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetWorkflowRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetWorkflow(ctx, request.(GetWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetWorkflow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetWorkflowResponseObject); ok {
+		if err := validResponse.VisitGetWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResumeWorkflow operation middleware
+func (sh *strictHandler) ResumeWorkflow(w http.ResponseWriter, r *http.Request, id string) {
+	var request ResumeWorkflowRequestObject
+
+	request.Id = id
+
+	var body ResumeWorkflowJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResumeWorkflow(ctx, request.(ResumeWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResumeWorkflow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResumeWorkflowResponseObject); ok {
+		if err := validResponse.VisitResumeWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RunWorkflow operation middleware
+func (sh *strictHandler) RunWorkflow(w http.ResponseWriter, r *http.Request, id string) {
+	var request RunWorkflowRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RunWorkflow(ctx, request.(RunWorkflowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RunWorkflow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RunWorkflowResponseObject); ok {
+		if err := validResponse.VisitRunWorkflowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"Hh4e/hsAAP//v0t56ZtLAAA=",
+	"H4sIAAAAAAAC/9Q82XLbuJa/guJMVeyMLMlxMg96czvpHmeyuOPkpm51UiqIPJIQgwADgLbVLv/7LSzc",
+	"QYpyS7LzZJk4AM6+AIe8C0IeJ5wBUzKY3AUyXEKMzc/TJDnjbE4W+p9E8ASEIiDdf9ckAiGbQyTGC9A/",
+	"/lvAPJgE/zUqNhi51UcXbr5b/34QUBpvOul+EKhVAsEk4LMfECrfk0FwKhSZ41A1MQ05uwYhsSKcTUmk",
+	"H7nZUgnCDFqhAKwgmmIzf85FrH8FEVZwpEgMwaA5Z04oTBOslt4VWzb6wWdtOMQkhql96hllOPYPJIJr",
+	"HrStmggeJ8o7JMnfMJ2tlGVTTjRh6n9fFgQTpmABIsiZfhcAS+Ng8pfTgUGg4FYFgyDiYRoD0z9xGhEe",
+	"DAItSP2XqyWI4HuDiz5JnuEEzwglauWRZWUMbnGcUIOkxmS4AAYCK6+0IpChIIlWAi8zRMqMoEvkxakM",
+	"qV5MrhhOJGyM/zsi1SeQCWcSOmjJLEpBLNcZR4k5xd5YCGz+lwqrDZa4NOBriLjM1qxi75hTsLKkJxm/",
+	"vIOKK0x9Q140llh9gp8pyH6GXZFy8NH8wHSIzueIx0QpiAYIIwY3qDwZEYmcB0A4VTzGioSY0tXQp0kx",
+	"SOl8X6GAn1KGMEpWaskZsjggtcQKJYIwJdESKOXe1XgEtLoWpTjGJz7gBITkDHcSixwQOn+NFEepBDTn",
+	"AqmlJnKJ1RBdgpJILQHhBTCVwWtZI8wipDinaE6oAuGhX5sK/EyJgMjYiGPG91bhtar/Oul9XkJVSoYE",
+	"tyGaAeVsIZHyclWUtm36PQVJf4v7BKehulSQ+AxOLXm6WKom8mdLTBjic+QgEBdIAJacEbZASuDQ66U0",
+	"76da9Zr8wmIhS+QUbG6JDP3C5hlnDEKN9GcwziqlHksrqbxXgVsHaFtMMhG+RTpYpbLsh/lVMAhACO6L",
+	"IIMgFbQX+YbYXJs8CvmAHKAt6G5ip6mECBGn3mWF93qASrRvW9kCNVdcYzWKKOqXZZpEG/LGx/83RoYN",
+	"xkP2uMcSb/lsO5Jr27RVpiK3jQ6V7UdBR0SLY8yiSjj4K7BRJRgER2GgNYAwdfDs/3RAQV+5oNGzQ20X",
+	"uTNrirXmtIBdG4cSRcQqzEUFibb5BQl57l/ELIvj5GR4PD6SlMQtTpmnIoQeLjcDrIebLOPMGPW9jcFt",
+	"UadFuBtJ8H3hDRshTen811th7KgKadNWTiu5bCpB6LxcSiIVNjm6XEkFRlCcU69n3U2gfPyg915HpssE",
+	"wuaGMyxh6o8oGa8Lpf95A+zF8NXkZOaVjJxSHlZy3RnnFDArE1Cs9ucNMPRi+Aqd/Nbi+fOgWUziJln0",
+	"WltNA2xxRI3xRMaGtLaRa/1zjqXyawD5u4alDzkfjy9sdPOIlFJ+A9FUS116sj6dfWrmSBu+sigZYqYj",
+	"5RC9iRO1QjFgJhGm1KSrUieq/R1gyKn1/bWtMaE3hEXIjCPFr4ChAxguhmhGUxggiDUHowG6JpyCOvSx",
+	"/SE2vK42JaEdqKL7Lg1JBEgPGoZt4B2InM5SQhVhfuU0qduUX4MQxGZ31a2NATWqCyeqqog0hPU0KII5",
+	"TqnyFlWtxxt27rTjGGM7uckFTRfEkxXWZFMYwhu2xCwEiUxMQhZBiW6IWqKfqS2nrmB1w0UkuyguxVCz",
+	"xBHYhYXXqEunFPm8rNxuqyeaO7ktMq56JupY1SD5eDgejjdh55oDEJ5WgmXpkCAx0/vHHie9hq17UbPZ",
+	"8XbSyLWmG212mrclZa4eoTZ9cEKmV7DyGDaWVxAhznSxGqGD58+fP7+9vb09HKCEYi2gW6VHbwRRuS+2",
+	"mKArgEQiuCVSEbYY+rllPMDUc+ixgDjGJ5PjF95YagJpFpeLSUulksloZEaXXKrJ8fHLk5ej6+O2k5Ym",
+	"xc/M5GfGi300wXR0xuP56sv5AD0TEHMFbjABdnp+pJUPKzKjgE4vznVh6uKrjfU6XdVzvNHUDvnJkJPR",
+	"CCdkyBNgmAxDHnvJ8Em7SLyagg5bNdMOTQlLUtVeDiiRgmfLOWGYTjGTNy1VPJHTFphSmOEzCeIat6LY",
+	"njT62VAqL2qWnaSlRVgaz6ybiSHmYjWNZ33PI79ycTWn/MZbuiUUNnUfu3A5G1e2D71akAqLTZHXhRZs",
+	"rG7NM6EEWKSXNCGR2V8JTiVEtjq0sjCpLaH2oY54VP/+56VOpgb+aqdLcfxmGoGmR06tRPsnsm3pHVMg",
+	"RJp4YhyeqzZrnMGcC2hJCFsPAH3EVo+/NrmSEq0HkApHWGFvLchT5XxYD9z6qVLEGZSVR16RJGlRnbyQ",
+	"6Ss3T5FqhDbnzfB0enHuEmxAOKXw8RL9PwgGdIBMIaUDr0xnMVE66KIffCbNIb5UAnCsH1G+MOWRO9wL",
+	"Kqu4GJZne8F4eDwcG6bqOJQQXfENx8MTY15qacgbXR+PzNXBKFxa20+4Pc3SIjPu/DzSuGuYMw1iD3FA",
+	"qt94tKqdlOAkoSQ0s0Y/pLUAa2drL7JKl0P31ZMi7UdK1wAG7Rfj8Za3domt2bsmNnOzUkAMgldb3N2e",
+	"o3q2PdeGzzBFOq6CQOAAB4FM4xiLlb2ZULZK0TplEDUQRqruEt3wawEemeqM/jSH0kohcAzKtAj8VVfe",
+	"380lEpqtULYwMoqvlT2YBD9TEKsgiz+BGypYsMVr5u//UBd6RYW8BaFp8Q1JaT4iPkcFx6tSMuOY0hpA",
+	"RUijOxLdW5eho11TWK/N8xythrSMFEwHQy4EEgV1OyqLZD1fXzZ9mEUj0mx56Rv/wBWa85RFNR7YeQiz",
+	"nAl6Ca9a/gFqv2Ruz5gLrfG4kcxsIlCYUFli4W4dSb4xa5HNH6AKo86xcxpa72xo9SRnZcBdumt/S4aH",
+	"8AISxTixflLmbRIe+3RnW2WS0YFtjkD/g9zRzGHBmtI1wBreVCD34b8q16Mb+LAqTS18qgENWnKGM1MQ",
+	"nVVvQR+aPFRzyPx2syi8P8ANcgnK+ouEHgnG8fY0tiILj56Wb3VdFVkP9Oapp93Fr4w9o0lNNL9mRKmx",
+	"oz2o7J/a8eOo0L4DTGXzriATtmCZYBUumzL7Ys5P9yK2rfqkrbif/emOZXPUdCuF8CxIVX72Ms0Qfdjh",
+	"hUZwnfUpew3z0hS3ZRzf2AmPYqG6LLEYH9mqu8rm+oINXhrcXcFe46EltMpDyxtEWEjTyJX/R7aTD4eK",
+	"XOvU5eDy8k0ng915TncG8j4D2gFbB3feGpCSmKhKEeiuDILJq3GzJXk/dV3W77FBSpTz15MNZWOIsEYk",
+	"chL7wWfdonmrAfZB+1s+24Rug/hTOu3I888MM3/aeWmO0DSxuzmqKjV97TmRLHdDeXj4ls/y1meZhiFI",
+	"OU8pXdlEYC9CvMaURFo+SCYQkrnb4EmpkdUPl0trnh2cfv1yWLHXPH9uyyWtdnUemOmVz19n52NPNrM0",
+	"TsGvS6/3nEfqPbvSx1SCMLpVP6PIRTaaEwpydKf/aFa3y/BS68dbPvudmLdCdhYTq4tkeO1Q+jxU4E9e",
+	"8ku9GWHYBOq16cznJSCNM8o2ayvSNBvLssvN/QHmqYcQtvtGRECo6ArNBY/NIbeW/w0XVzLBIXg0oKC8",
+	"I918aua7Ju0sNftomAmyF1/fWIQVnqC7b+4m7FswQd+CT18+fDj/8Me34P4b+8bcDMoXJXBKGFjgMx4n",
+	"hBK2GA6HZkYftahmuS0q0WXNLhfWsqR8kd1yaRKQbZqRtbTXNJmsyXAtyF6SyLzndJPbgWtMKJ5RQI4Y",
+	"X3JTg0EHRu9DrDDlizo7RhGRIb+2d8D+XOi1gygxZxulLiUKKI2npd6jZpuPg1nf6PNyPB77+gtsP2zf",
+	"TqF+5373T04/MhFB5FeMbDxTCaMRtrtJ282IC/SOKHj37n2uHu7OvtteLjKgfXAk6yDewF5yIlqKgGK8",
+	"+/w523pbut/oeX5Ar3Khy+EKsx6NQcWE11hpuWO6kkTaLBtTIr2Nn1mvcTF7hsVRuMRCtb6+2NEp/NGN",
+	"WE1s9Aq7EyHXSH8U8gjE5GR22K9h9tSQ5MWr0TZczPo3TxEWOl2ICr6o4XD9y44uDauu/f2RbwpyM2ma",
+	"xUXWO999PxCmUvE4E0nDI/S8GChs5he9E0gKf9NWwu2VxvE+VWTf5//Zvl21W9LErfPUf9fSeSqR4MHv",
+	"j/Tw3tt7MeOxrzA6lD67vShZ/JNQendl0nDExcsQ7ZmZg9klQ5uvdHSkYpTjCCL0FcsYZQR4sjIHdmn7",
+	"JCqQhnTbgbyG9gxoL1mpe3tkk6w0w68tK83H12Slbutt+aLWfPE9Fldg+klDHCeYLBjCUoLq+R7TWTbp",
+	"z5f9UqpHT6EymXpM1r1K36PFIslXqepu3/wpl+6vmj8VltGaP+2TxvE+9WPv+ZPbtzN/auLWnT/tWDo7",
+	"8Fl905VHT0baNShPRgrzeRIalCUjDuxAc3aASmsc+j1dzyZyt31HL/nj+4Tdd33b775AJXbUM4QyLO6O",
+	"Mhu0lzr+17tMf00ZbKVztYcsGvBNeUgwb+LIrpvgywxml23l+Vcdfd13qRCmYahYHuWIe3rwHHgGgg4k",
+	"hAKURLF5X/jQhJZUtQWWCr3bb66okbo/r97J48yvdzJtLy0W/8KURK55zHN56hx9gSewUKwSJVGGMFZI",
+	"gFSHDSUfqewzRt6y5TOYNnb3gbGt1S2VL6Fkb1/TOMg+TPR9XdGRL/D98dssm19f83fLOjikOY5EBlmW",
+	"o14CZaRpV5XxPZPajXsHtTswfM2h9uG58xeqN/DaBR0tBXUJoLuiznd/5PS0x6vWW3092XepYXZ47Eq8",
+	"UIem+LOxohbP/ae/pcx+2qCjYs/0BEUwJ4z4jWVtX1dJiX6pqrYXr5t1bQtgVyF6U1ut1LvRwu+R9nDW",
+	"VPz2+8mM75z12/AJ5pMHU9ejsuGnD3bRjtDErueX7zrUxIqrLnsrJJ0kmy8z5HrQKvSUdUg8ZU/Z0rb9",
+	"mcEOZrvvbjzcJu3HikvSuL//TwAAAP//TYKDoiBeAAA=",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

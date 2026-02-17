@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react"
-import { Send, Bot, User, Cpu, Terminal, ChevronRight, Sparkles, Wrench, ArrowRight } from "lucide-react"
+import { Send, Bot, User, Cpu, ChevronRight, Sparkles, Wrench, ArrowRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { api as client } from "@/lib/api"
 import { useConversationStore, type Message } from "@/store/conversations"

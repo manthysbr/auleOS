@@ -27,31 +27,33 @@ type Server struct {
 	discovery   *services.ModelDiscovery
 	capRouter   *services.CapabilityRouter
 	synapseRT   *synapse.Runtime
+	workflowExec *services.WorkflowExecutor
 	workerMgr   interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	}
 	repo interface {
 		GetJob(ctx context.Context, id domain.JobID) (domain.Job, error)
 		ListJobs(ctx context.Context) ([]domain.Job, error)
-		// Projects
 		CreateProject(ctx context.Context, proj domain.Project) error
 		GetProject(ctx context.Context, id domain.ProjectID) (domain.Project, error)
 		ListProjects(ctx context.Context) ([]domain.Project, error)
 		UpdateProject(ctx context.Context, proj domain.Project) error
 		DeleteProject(ctx context.Context, id domain.ProjectID) error
 		ListProjectConversations(ctx context.Context, projectID domain.ProjectID) ([]domain.Conversation, error)
-		// Artifacts
 		SaveArtifact(ctx context.Context, art domain.Artifact) error
 		GetArtifact(ctx context.Context, id domain.ArtifactID) (domain.Artifact, error)
 		ListArtifacts(ctx context.Context) ([]domain.Artifact, error)
 		ListProjectArtifacts(ctx context.Context, projectID domain.ProjectID) ([]domain.Artifact, error)
 		DeleteArtifact(ctx context.Context, id domain.ArtifactID) error
-		// Personas
 		CreatePersona(ctx context.Context, p domain.Persona) error
 		GetPersona(ctx context.Context, id domain.PersonaID) (domain.Persona, error)
 		ListPersonas(ctx context.Context) ([]domain.Persona, error)
 		UpdatePersona(ctx context.Context, p domain.Persona) error
 		DeletePersona(ctx context.Context, id domain.PersonaID) error
+		// Workflows
+		GetWorkflow(ctx context.Context, id domain.WorkflowID) (*domain.Workflow, error)
+		SaveWorkflow(ctx context.Context, wf *domain.Workflow) error
+		ListWorkflows(ctx context.Context) ([]domain.Workflow, error)
 	}
 }
 
@@ -69,6 +71,7 @@ func NewServer(
 	discovery *services.ModelDiscovery,
 	capRouter *services.CapabilityRouter,
 	synapseRT *synapse.Runtime,
+	workflowExec *services.WorkflowExecutor,
 	workerMgr interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	},
@@ -91,20 +94,25 @@ func NewServer(
 		ListPersonas(ctx context.Context) ([]domain.Persona, error)
 		UpdatePersona(ctx context.Context, p domain.Persona) error
 		DeletePersona(ctx context.Context, id domain.PersonaID) error
+		// Workflows
+		GetWorkflow(ctx context.Context, id domain.WorkflowID) (*domain.Workflow, error)
+		SaveWorkflow(ctx context.Context, wf *domain.Workflow) error
+		ListWorkflows(ctx context.Context) ([]domain.Workflow, error)
 	}) *Server {
 	return &Server{
-		logger:      logger,
-		lifecycle:   lifecycle,
-		reactAgent:  reactAgent,
-		eventBus:    eventBus,
-		settings:    settings,
-		convStore:   convStore,
-		modelRouter: modelRouter,
-		discovery:   discovery,
-		capRouter:   capRouter,
-		synapseRT:   synapseRT,
-		workerMgr:   workerMgr,
-		repo:        repo,
+		logger:       logger,
+		lifecycle:    lifecycle,
+		reactAgent:   reactAgent,
+		eventBus:     eventBus,
+		settings:     settings,
+		convStore:    convStore,
+		modelRouter:  modelRouter,
+		discovery:    discovery,
+		capRouter:    capRouter,
+		synapseRT:    synapseRT,
+		workflowExec: workflowExec,
+		workerMgr:    workerMgr,
+		repo:         repo,
 	}
 }
 
@@ -123,15 +131,6 @@ func (s *Server) Handler() http.Handler {
 		// Intercept SSE endpoint for conversation events
 		if r.Method == "GET" && isConversationEventsPath(r.URL.Path) {
 			s.handleConversationSSE(w, r)
-			return
-		}
-		// Plugin management endpoints
-		if r.URL.Path == "/v1/plugins" && r.Method == "GET" {
-			s.handleListPlugins(w, r)
-			return
-		}
-		if r.URL.Path == "/v1/capabilities" && r.Method == "GET" {
-			s.handleListCapabilities(w, r)
 			return
 		}
 		mux.ServeHTTP(w, r)
@@ -182,6 +181,80 @@ func (s *Server) SubmitJob(ctx context.Context, request SubmitJobRequestObject) 
 		Id:     toPtr(string(jobID)),
 		Status: toPtr(string(domain.JobStatusPending)),
 	}, nil
+}
+
+// ListPlugins implements StrictServerInterface
+func (s *Server) ListPlugins(ctx context.Context, request ListPluginsRequestObject) (ListPluginsResponseObject, error) {
+	var plugins []Plugin
+
+	if s.synapseRT != nil {
+		for _, name := range s.synapseRT.ListPlugins() {
+			if p, ok := s.synapseRT.GetPlugin(name); ok {
+				meta := p.Meta()
+				plugins = append(plugins, Plugin{
+					Name:        &meta.Name,
+					Version:     &meta.Version,
+					Description: &meta.Description,
+					ToolName:    &meta.ToolName,
+					Runtime:     toPtr("synapse"),
+				})
+			}
+		}
+	}
+
+	if plugins == nil {
+		plugins = []Plugin{}
+	}
+
+	return ListPlugins200JSONResponse{
+		Plugins: &plugins,
+		Count:   toPtrInt(len(plugins)),
+	}, nil
+}
+
+// ListCapabilities implements StrictServerInterface
+func (s *Server) ListCapabilities(ctx context.Context, request ListCapabilitiesRequestObject) (ListCapabilitiesResponseObject, error) {
+	var caps []Capability
+
+	if s.capRouter != nil {
+		for name, route := range s.capRouter.ListRoutes() {
+			n := name
+			r := string(route.Runtime)
+			d := route.Description
+			rt := CapabilityRuntime(r) // assuming enum match
+			caps = append(caps, Capability{
+				Capability:  &n,
+				Runtime:     &rt,
+				Description: &d,
+			})
+		}
+	}
+
+	if caps == nil {
+		caps = []Capability{}
+	}
+
+	stats := map[string]int{"total": 0, "muscle": 0, "synapse": 0}
+	if s.capRouter != nil {
+		stats = s.capRouter.Stats()
+	}
+
+	m := stats["muscle"]
+	syn := stats["synapse"]
+	t := stats["total"]
+
+	return ListCapabilities200JSONResponse{
+		Capabilities: &caps,
+		Stats: &CapabilityStats{
+			Muscle:  &m,
+			Synapse: &syn,
+			Total:   &t,
+		},
+	}, nil
+}
+
+func toPtrInt(i int) *int {
+	return &i
 }
 
 // GetJob implements StrictServerInterface

@@ -8,6 +8,7 @@ import { Dashboard } from "@/components/shell/Dashboard"
 import { ProjectView } from "@/components/shell/ProjectView"
 import { AgentsView } from "@/components/shell/AgentsView"
 import { ToolsView } from "@/components/shell/ToolsView"
+import { WorkflowsView } from "@/components/shell/WorkflowsView"
 import { JobsView } from "@/components/shell/JobsView"
 import { SettingsPanel } from "@/components/workspace/SettingsPanel"
 import { useUIStore } from "@/store/ui"
@@ -24,6 +25,8 @@ function CenterStage() {
             return <ProjectView />
         case "agents":
             return <AgentsView />
+        case "workflows":
+            return <WorkflowsView />
         case "tools":
             return <ToolsView />
         case "jobs":

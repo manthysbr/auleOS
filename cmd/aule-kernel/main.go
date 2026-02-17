@@ -246,8 +246,19 @@ func run(logger *slog.Logger) error {
 	// Capability Router — decides Synapse vs Muscle per capability
 	capRouter := services.NewCapabilityRouter(logger, wasmRT)
 
+	// Workflow Engine (M12)
+	workflowExec := services.NewWorkflowExecutor(logger, repo, reactAgent)
+	
+	// Register Workflow Tools
+	if err := toolRegistry.Register(services.NewCreateWorkflowTool(repo)); err != nil {
+		logger.Error("failed to register create_workflow tool", "error", err)
+	}
+	if err := toolRegistry.Register(services.NewRunWorkflowTool(workflowExec, repo)); err != nil {
+		logger.Error("failed to register run_workflow tool", "error", err)
+	}
+
 	// Initialize Kernel API Server
-	apiServer := kernel.NewServer(logger, lifecycle, reactAgent, eventBus, settingsStore, convStore, modelRouter, discovery, capRouter, wasmRT, workerMgr, repo)
+	apiServer := kernel.NewServer(logger, lifecycle, reactAgent, eventBus, settingsStore, convStore, modelRouter, discovery, capRouter, wasmRT, workflowExec, workerMgr, repo)
 
 	// Setup HTTP Server
 	// CORS Configuration

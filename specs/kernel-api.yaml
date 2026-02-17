@@ -133,6 +133,127 @@ paths:
         '500':
           description: Internal server error
 
+  # --- Workflows ---
+  /v1/workflows:
+    get:
+      summary: List all workflows
+      operationId: ListWorkflows
+      responses:
+        '200':
+          description: List of workflows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Workflow'
+    post:
+      summary: Create a new workflow definition
+      operationId: CreateWorkflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, steps]
+              properties:
+                project_id:
+                  type: string
+                name:
+                  type: string
+                description:
+                  type: string
+                steps:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/WorkflowStep'
+      responses:
+        '201':
+          description: Workflow created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workflow'
+        '400':
+          description: Invalid input
+
+  /v1/workflows/{id}:
+    get:
+      summary: Get workflow details and status
+      operationId: GetWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workflow'
+        '404':
+          description: Workflow not found
+
+  /v1/workflows/{id}/run:
+    post:
+      summary: Run a workflow
+      operationId: RunWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  status:
+                    type: string
+        '404':
+          description: Workflow not found
+
+  /v1/workflows/{id}/resume:
+    post:
+      summary: Resume a paused workflow
+      operationId: ResumeWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                state_updates:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Workflow resumed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+
   /v1/agent/chat:
     post:
       summary: Chat with the Agent
@@ -1173,3 +1294,73 @@ components:
             $ref: '#/components/schemas/Capability'
         stats:
           $ref: '#/components/schemas/CapabilityStats'
+
+    Workflow:
+      type: object
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, paused, completed, failed, cancelled]
+        state:
+          type: object
+          additionalProperties: true
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowStep'
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        error:
+          type: string
+
+    WorkflowStep:
+      type: object
+      properties:
+        id:
+          type: string
+        persona_id:
+          type: string
+        prompt:
+          type: string
+        tools:
+          type: array
+          items:
+            type: string
+        depends_on:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [pending, running, done, failed, skipped]
+        result:
+          type: object
+          properties:
+            output:
+              type: string
+            metadata:
+              type: object
+        interrupt:
+          type: object
+          properties:
+            before:
+              type: boolean
+            after:
+              type: boolean
+            message:
+              type: string

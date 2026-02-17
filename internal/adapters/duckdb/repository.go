@@ -112,6 +112,19 @@ func (r *Repository) migrate() error {
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS workflows (
+			id TEXT PRIMARY KEY,
+			project_id TEXT,
+			name TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			steps JSON,
+			state JSON,
+			status TEXT,
+			created_at TIMESTAMP,
+			started_at TIMESTAMP,
+			completed_at TIMESTAMP,
+			error TEXT
+		);`,
 	}
 
 	for _, q := range queries {

@@ -113,8 +113,10 @@ func searchDuckDuckGo(ctx context.Context, query string) ([]SearchResult, error)
 	if err != nil {
 		return nil, err
 	}
-	// User-Agent is often required to avoid 403
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Compatible; auleOS/1.0)")
+	// Use a modern User-Agent to avoid being blocked or served mobile version
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -133,42 +135,40 @@ func searchDuckDuckGo(ctx context.Context, query string) ([]SearchResult, error)
 	}
 	html := string(body)
 
-	// Regex scraping (brittle but standard lib only)
-	// Structure typically: <a class="result__a" href="...">TITLE</a>
-	// Snippet: <a class="result__snippet" ...>SNIPPET</a>
+	// Updated Regex for current DDG HTML layout (2024/2025)
+	// The results are typically in <div class="result ...">
+	// Title link: <a class="result__a" href="...">
+	// Snippet: <a class="result__snippet" ...>
 	
-	// Let's look for result__body elements
-	// This is very rough scraping.
-	// Pattern for link and title: <a class="result__a" href="([^"]+)">([^<]+)</a>
-	// Pattern for snippet: <a class="result__snippet" href="[^"]+">([^<]+)</a>
-	
-	// NOTE: Parsing HTML with regex is bad practice, but without x/net/html, it's our only zero-dependency option.
-	// We will try to match "result__a" links.
-	
-	var results []SearchResult
-	
-	// Create regex for result items
-	// We iterate over the "result" divs if possible, or just global match
-	// Global match:
-	reLink := regexp.MustCompile(`<a class="result__a" href="([^"]+)">([^<]+)</a>`)
-	reSnippet := regexp.MustCompile(`<a class="result__snippet" href="[^"]+">([^<]+)</a>`)
+	// Let's broaden the regex slightly to be more robust
+	// Find result blocks first? No, regex on HTML is hard.
+	// We will look for the specific class signatures which seem stable on the HTML version.
 
-	// Find all submatches
-	linkMatches := reLink.FindAllStringSubmatch(html, 10) // Limit to 10
+	// Pattern for result title link: <a class="result__a" href="(url)">(title)</a>
+	// We use `(?s)` to allow dot to match newlines if needed, though usually on one line.
+	reLink := regexp.MustCompile(`<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([^<]+)</a>`)
+	
+	// Pattern for snippet: <a class="result__snippet" ...>(text)</a>
+	reSnippet := regexp.MustCompile(`<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([^<]+)</a>`)
+
+	linkMatches := reLink.FindAllStringSubmatch(html, 10)
 	snippetMatches := reSnippet.FindAllStringSubmatch(html, 10)
 
+	var results []SearchResult
 	for i, match := range linkMatches {
-		if i >= 5 { break } // Top 5
+		if i >= 5 { break }
 		
-		link := match[1]
+		rawLink := match[1]
 		title := match[2]
 		
-		// Clean up DDG redirects in links (sometimes they are /l/?kh=...)
-		// Actually html.duckduckgo.com usually returns direct links or u/ links.
-		// Let's decode URL if needed.
-		if strings.Contains(link, "duckduckgo.com/l/?") {
-			// Extract real URL if possible, or leave it.
-			// Ideally we use url.ParseQuery.
+		// Decode URL if it is a DDG redirect (//duckduckgo.com/l/?kh=-1&uddg=...)
+		decodedLink := rawLink
+		if strings.Contains(rawLink, "uddg=") {
+			if u, err := url.Parse(rawLink); err == nil {
+				if val := u.Query().Get("uddg"); val != "" {
+					decodedLink = val
+				}
+			}
 		}
 
 		snippet := ""
@@ -176,21 +176,29 @@ func searchDuckDuckGo(ctx context.Context, query string) ([]SearchResult, error)
 			snippet = snippetMatches[i][1]
 		}
 
-		// Simple HTML Entity decoding (basic)
+		// Simple HTML decoding
+		title = strings.TrimSpace(title)
+		snippet = strings.TrimSpace(snippet)
+		
+		// Remove bold tags
 		title = strings.ReplaceAll(title, "<b>", "")
 		title = strings.ReplaceAll(title, "</b>", "")
 		snippet = strings.ReplaceAll(snippet, "<b>", "")
 		snippet = strings.ReplaceAll(snippet, "</b>", "")
-		
-		results = append(results, SearchResult{
-			Title:   title,
-			Link:    link,
-			Snippet: snippet,
-		})
+
+		if title != "" && decodedLink != "" {
+			results = append(results, SearchResult{
+				Title:   title,
+				Link:    decodedLink,
+				Snippet: snippet,
+			})
+		}
 	}
 
 	if len(results) == 0 {
-		return nil, fmt.Errorf("no results found on DuckDuckGo (layout likely changed)")
+		// Log the HTML snippet for debugging if we fail (would go to logger ideally)
+		// For now, return error with hint
+		return nil, fmt.Errorf("no results found on DuckDuckGo (layout likely changed or blocked)")
 	}
 
 	return results, nil
