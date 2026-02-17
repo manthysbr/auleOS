@@ -134,6 +134,13 @@ func run(logger *slog.Logger) error {
 	}
 	defer wasmRT.Close(ctx)
 
+	// Host Services — The Bridge between Synapse (Wasm) and Muscle (Docker)
+	// Allows plugins to call `aule.delegate` to spawn heavy tasks.
+	hostServices := synapse.NewHostServices(logger, lifecycle)
+	if err := wasmRT.RegisterHostServices(ctx, hostServices); err != nil {
+		return fmt.Errorf("failed to register host services: %w", err)
+	}
+
 	// Discover and load Wasm plugins from ~/.aule/plugins/
 	homeDir, _ := os.UserHomeDir()
 	pluginDir := filepath.Join(homeDir, ".aule", "plugins")
@@ -196,6 +203,23 @@ func run(logger *slog.Logger) error {
 		logger.Error("failed to register list_forged_tools tool", "error", err)
 	}
 	logger.Info("tool forge initialized", "plugin_dir", pluginDir)
+
+	// Core Agent Tools (M10)
+	// FS Tools
+	if err := toolRegistry.Register(services.NewReadFileTool(workspaceMgr)); err != nil {
+		logger.Error("failed to register read_file tool", "error", err)
+	}
+	if err := toolRegistry.Register(services.NewWriteFileTool(workspaceMgr)); err != nil {
+		logger.Error("failed to register write_file tool", "error", err)
+	}
+	if err := toolRegistry.Register(services.NewListDirTool(workspaceMgr)); err != nil {
+		logger.Error("failed to register list_dir tool", "error", err)
+	}
+	// Exec Tool
+	execTool := services.NewExecTool(lifecycle, repo)
+	if err := toolRegistry.Register(execTool); err != nil {
+		logger.Error("failed to register exec tool", "error", err)
+	}
 
 	// ReAct Agent Service - agentic reasoning with tools + model routing
 	reactAgent := services.NewReActAgentService(logger, llmProvider, modelRouter, toolRegistry, convStore, repo)

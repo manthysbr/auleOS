@@ -162,15 +162,27 @@ func (s *WorkerLifecycle) executeJob(ctx context.Context, job domain.Job) {
 	progressStart := 10
 	s.publishStatusWithProgress(string(job.ID), string(domain.JobStatusRunning), &progressStart)
 
-	// 1. Create Workspace
-	wsPath, err := s.workspace.PrepareWorkspace(string(job.ID))
-	if err != nil {
-		s.failJob(ctx, job, fmt.Errorf("workspace prep failed: %w", err))
-		return
+	// 1. Prepare Workspace (Project-based or Ephemeral)
+	var wsPath string
+	var err error
+
+	// If job has project_id, we mount the persistent project workspace
+	if projectID, ok := job.Metadata["project_id"]; ok && projectID != "" {
+		wsPath, err = s.workspace.PrepareProject(projectID)
+		if err != nil {
+			s.failJob(ctx, job, fmt.Errorf("project workspace prep failed: %w", err))
+			return
+		}
+		s.logger.Info("project workspace mounted", "path", wsPath, "project_id", projectID)
+	} else {
+		// Default to ephemeral job workspace
+		wsPath, err = s.workspace.PrepareWorkspace(string(job.ID))
+		if err != nil {
+			s.failJob(ctx, job, fmt.Errorf("workspace prep failed: %w", err))
+			return
+		}
+		s.logger.Info("ephemeral workspace prepared", "path", wsPath)
 	}
-	s.logger.Info("workspace prepared", "path", wsPath)
-	// Defer cleanup if we want ephemeral workspaces (POLICY: do we keep them? Yes for debugging, maybe reap later)
-	// For now, keep them.
 
 	// 2. persist job status RUNNING
 	job.Status = domain.JobStatusRunning

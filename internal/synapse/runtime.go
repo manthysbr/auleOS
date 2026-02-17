@@ -54,6 +54,14 @@ func NewRuntime(ctx context.Context, logger *slog.Logger) (*Runtime, error) {
 	}, nil
 }
 
+// RegisterHostServices registers the "aule" host module functions (log, delegate, etc.)
+// into the Wasm runtime. This must be called before loading any plugins that use them.
+func (r *Runtime) RegisterHostServices(ctx context.Context, host *HostServices) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return host.InstantiateHostFunctions(ctx, r.rt)
+}
+
 // LoadPlugin compiles a .wasm binary and registers it as a named plugin.
 // The plugin becomes available as a Tool in the agent's ToolRegistry.
 // If a plugin with the same name exists, it is replaced (hot-reload).

@@ -204,65 +204,67 @@ func (f *Forge) Create(ctx context.Context, toolName, description string) (*Forg
 
 // generateCode asks the LLM to produce a Go WASI program.
 func (f *Forge) generateCode(ctx context.Context, toolName, description string) (string, error) {
-	prompt := fmt.Sprintf(`You are a Go code generator for the auleOS Tool Forge.
-Generate a complete, compilable Go program that implements the following tool.
+	prompt := fmt.Sprintf(`You are a minimalist but precise Go code generator for auleOS.
+TARGET: Generate a single-file Go program that compiles to Wasm (WASIP1).
 
-TOOL NAME: %s
-DESCRIPTION: %s
+INPUT:
+Tool Name: %s
+Description: %s
 
-REQUIREMENTS:
-1. Package must be "main" with a main() function
-2. Read JSON input from stdin using io.ReadAll(os.Stdin)
-3. Parse input as map[string]interface{} using encoding/json
-4. Process the input according to the tool description
-5. Write JSON output to stdout using fmt.Print(string(jsonBytes))
-6. Use ONLY Go standard library (no external dependencies)
-7. Handle errors gracefully - return {"error": "message"} on failure
-8. The program will be compiled with GOOS=wasip1 GOARCH=wasm
+STRICT RULES:
+1. PACKAGE: Must be "package main".
+2. IMPORTS: You MUST import "encoding/json", "fmt", "io", "os", and any other library you use (e.g. "strings", "math", "time").
+3. MAIN FUNCTION:
+   - Read stdin: input, _ := io.ReadAll(os.Stdin)
+   - Parse JSON: var params map[string]interface{}; json.Unmarshal(input, &params)
+   - Logic: Implementation of the description.
+   - Output: Print JSON to stdout. map[string]interface{"result": ..., "status": "ok"}
+4. NO EXTERNAL DEPS: Use only Go Standard Library.
+5. ERROR HANDLING: On error, print JSON: {"status": "error", "message": "..."} and exit.
 
-OUTPUT FORMAT:
-Return ONLY the Go source code, no markdown fences, no explanation.
-Start with "package main" and end with the closing brace of main().
-
-Add a comment at the top describing the parameters in this exact format:
-// @params {"type":"object","properties":{"input_field":{"type":"string","description":"desc"}},"required":["input_field"]}
-
-EXAMPLE TEMPLATE:
+TEMPLATE:
 package main
 
-// @params {"type":"object","properties":{"text":{"type":"string","description":"The text to process"}},"required":["text"]}
+// @params {"type":"object","properties":{...}}
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strings" // Example: Add if used
 )
 
 func main() {
+	// 1. Read Input
 	input, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		fmt.Print(`+"`"+`{"error":"failed to read input"}`+"`"+`)
+		fmt.Print(`+"`"+`{"status":"error","message":"failed to read input"}`+"`"+`)
 		return
 	}
 
+	// 2. Parse Params
 	var params map[string]interface{}
 	if err := json.Unmarshal(input, &params); err != nil {
-		fmt.Print(`+"`"+`{"error":"invalid JSON input"}`+"`"+`)
+		fmt.Print(`+"`"+`{"status":"error","message":"invalid JSON"}`+"`"+`)
 		return
 	}
 
-	// Process params here...
-	text, _ := params["text"].(string)
+	// 3. Logic (Validation + Execution)
+	// TIP: Cast params safely: text, _ := params["text"].(string)
+	
+	// ... YOUR CODE HERE ...
 
-	result := map[string]interface{}{
-		"result": text,
+	// 4. Output
+	res := map[string]interface{}{
+		"result": "...",
 		"status": "ok",
 	}
+	out, _ := json.Marshal(res)
+	fmt.Print(string(out))
+}
 
-	output, _ := json.Marshal(result)
-	fmt.Print(string(output))
-}`, toolName, description)
+Generate ONLY the Go source code. No markdown.`, toolName, description)
 
 	response, err := f.llm.GenerateText(ctx, prompt, f.model)
 	if err != nil {

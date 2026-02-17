@@ -14,7 +14,7 @@ import (
 // WorkerSpawner defines the interface for spawning Muscle (Docker) jobs.
 // This decouples synapse from the concrete WorkerLifecycle implementation.
 type WorkerSpawner interface {
-	SpawnJob(ctx context.Context, spec domain.JobSpec) (domain.JobID, error)
+	SubmitJob(ctx context.Context, spec domain.WorkerSpec) (domain.JobID, error)
 }
 
 // HostServices provides the bridge between Wasm plugins and Kernel capabilities.
@@ -73,7 +73,7 @@ func (h *HostServices) fnDelegate(ctx context.Context, mod api.Module, stack []u
 		return
 	}
 
-	var spec domain.JobSpec
+	var spec domain.WorkerSpec
 	if err := json.Unmarshal([]byte(specJSON), &spec); err != nil {
 		h.logger.Error("synapse: invalid delegate spec JSON", "error", err, "json", specJSON)
 		stack[0] = 0
@@ -87,9 +87,9 @@ func (h *HostServices) fnDelegate(ctx context.Context, mod api.Module, stack []u
 		return
 	}
 
-	jobID, err := h.spawner.SpawnJob(ctx, spec)
+	jobID, err := h.spawner.SubmitJob(ctx, spec)
 	if err != nil {
-		h.logger.Error("synapse: failed to spawn job", "error", err)
+		h.logger.Error("synapse: failed to submit job", "error", err)
 		stack[0] = 0
 		return
 	}

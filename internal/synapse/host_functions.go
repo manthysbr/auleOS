@@ -21,6 +21,6 @@ const hostModuleName = "aule"
 //	hs.InstantiateHostFunctions(ctx, rt)
 func InstantiateHostFunctions(ctx context.Context, rt wazero.Runtime, logger *slog.Logger) error {
 	// Create minimal host services — no vault, no KV, just log + metric
-	hs := NewHostServices(logger, nil, nil)
+	hs := NewHostServices(logger, nil)
 	return hs.InstantiateHostFunctions(ctx, rt)
 }

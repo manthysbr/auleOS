@@ -121,6 +121,14 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 	// Inject conversation ID into context for sub-agent tools
 	ctx = ContextWithConversation(ctx, convID)
 
+	// Inject ProjectID into context if available
+	// Ensure we have the latest conversation state (although convID is usually sufficient, project might be loaded)
+	// We need to fetch the conversation metadata to get the ProjectID
+	if currentConv, err := s.convs.GetConversation(ctx, convID); err == nil && currentConv.ProjectID != nil {
+		ctx = ContextWithProject(ctx, *currentConv.ProjectID)
+		s.logger.Info("context injected with project_id", "project_id", string(*currentConv.ProjectID))
+	}
+
 	for i := 0; i < s.maxIters; i++ {
 		s.logger.Info("ReAct iteration", "iteration", i+1)
 
