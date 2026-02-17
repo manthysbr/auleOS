@@ -20,3 +20,5 @@ docs/architecture/v2-muscle-synapse.md
 genplugin
 go.mod
 go.sum
+*db.wal*
+*db.*
