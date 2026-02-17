@@ -67,6 +67,8 @@ type DelegateRequest struct {
 
 // DelegateTaskSpec describes one sub-task to delegate.
 type DelegateTaskSpec struct {
-	Persona string `json:"persona"` // persona ID or name
-	Prompt  string `json:"prompt"`  // what the sub-agent should do
+	Persona string `json:"persona"`           // persona ID or name
+	Prompt  string `json:"prompt"`            // what the sub-agent should do
+	Runtime string `json:"runtime,omitempty"` // "synapse" for Wasm fast-path, empty/"muscle" for LLM
+	Plugin  string `json:"plugin,omitempty"`  // synapse plugin name (required when runtime=synapse)
 }

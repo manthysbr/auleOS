@@ -176,7 +176,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Sub-Agent Orchestrator - parallel delegation engine
-	subOrchestrator := services.NewSubAgentOrchestrator(logger, modelRouter, toolRegistry, repo, eventBus)
+	subOrchestrator := services.NewSubAgentOrchestrator(logger, modelRouter, toolRegistry, repo, eventBus, wasmRT)
 
 	// Register delegate tool (must be after orchestrator creation)
 	delegateTool := services.NewDelegateTool(subOrchestrator)
@@ -184,6 +184,18 @@ func run(logger *slog.Logger) error {
 		logger.Error("failed to register delegate tool", "error", err)
 		return err
 	}
+
+	// Tool Forge — LLM-driven tool creation (text → Go → Wasm → hot-load)
+	forge := synapse.NewForge(logger, modelRouter, "qwen2.5:latest", wasmRT, toolRegistry, pluginDir)
+	createToolTool := services.NewCreateToolTool(forge)
+	if err := toolRegistry.Register(createToolTool); err != nil {
+		logger.Error("failed to register create_tool tool", "error", err)
+	}
+	listForgedTool := services.NewListForgedToolsTool(forge)
+	if err := toolRegistry.Register(listForgedTool); err != nil {
+		logger.Error("failed to register list_forged_tools tool", "error", err)
+	}
+	logger.Info("tool forge initialized", "plugin_dir", pluginDir)
 
 	// ReAct Agent Service - agentic reasoning with tools + model routing
 	reactAgent := services.NewReActAgentService(logger, llmProvider, modelRouter, toolRegistry, convStore, repo)

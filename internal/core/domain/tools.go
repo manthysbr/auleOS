@@ -6,12 +6,25 @@ import (
 	"fmt"
 )
 
+// ExecType identifies how a tool is executed.
+type ExecType string
+
+const (
+	// ExecNative runs in the Go kernel process (default for built-in tools).
+	ExecNative ExecType = "native"
+	// ExecWasm runs inside the Synapse Wasm sandbox (forged/plugin tools).
+	ExecWasm ExecType = "wasm"
+	// ExecDocker runs inside a Docker container (heavy/GPU tools).
+	ExecDocker ExecType = "docker"
+)
+
 // Tool represents an executable capability available to the agent
 type Tool struct {
-	Name        string
-	Description string
-	Parameters  ToolParameters
-	Execute     ToolExecutor
+	Name          string
+	Description   string
+	Parameters    ToolParameters
+	Execute       ToolExecutor
+	ExecutionType ExecType // "native", "wasm", or "docker" (default: native)
 }
 
 // ToolParameters defines the schema for tool inputs
@@ -75,7 +88,13 @@ func (r *ToolRegistry) FormatToolsForPrompt() string {
 	result := "Available Tools:\n"
 	for _, tool := range r.tools {
 		paramsJSON, _ := json.MarshalIndent(tool.Parameters, "  ", "  ")
-		result += fmt.Sprintf("- %s: %s\n  Parameters: %s\n", tool.Name, tool.Description, string(paramsJSON))
+		execTag := ""
+		if tool.ExecutionType == ExecWasm {
+			execTag = " [wasm]"
+		} else if tool.ExecutionType == ExecDocker {
+			execTag = " [docker]"
+		}
+		result += fmt.Sprintf("- %s%s: %s\n  Parameters: %s\n", tool.Name, execTag, tool.Description, string(paramsJSON))
 	}
 	return result
 }

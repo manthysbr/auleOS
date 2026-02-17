@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/manthysbr/auleOS/internal/core/domain"
+	"github.com/manthysbr/auleOS/internal/synapse"
 )
 
 // SubAgentOrchestrator manages the execution of sub-agent tasks.
@@ -18,11 +19,12 @@ import (
 // each is dispatched to a persona-specific mini-ReAct loop in a goroutine.
 // Events are published on the EventBus so the UI can visualise the sub-agent tree.
 type SubAgentOrchestrator struct {
-	logger *slog.Logger
-	router *ModelRouter
-	tools  *domain.ToolRegistry
-	repo   personaReader
-	bus    *EventBus
+	logger  *slog.Logger
+	router  *ModelRouter
+	tools   *domain.ToolRegistry
+	repo    personaReader
+	bus     *EventBus
+	synapse *synapse.Runtime // Wasm runtime for fast-path sub-agents
 
 	mu       sync.RWMutex
 	active   map[domain.SubAgentID]*domain.SubAgentTask // currently running
@@ -36,6 +38,7 @@ func NewSubAgentOrchestrator(
 	tools *domain.ToolRegistry,
 	repo personaReader,
 	bus *EventBus,
+	synapseRT *synapse.Runtime,
 ) *SubAgentOrchestrator {
 	return &SubAgentOrchestrator{
 		logger:   logger,
@@ -43,6 +46,7 @@ func NewSubAgentOrchestrator(
 		tools:    tools,
 		repo:     repo,
 		bus:      bus,
+		synapse:  synapseRT,
 		active:   make(map[domain.SubAgentID]*domain.SubAgentTask),
 		maxIters: 3, // sub-agents are focused — fewer iterations
 	}
@@ -70,7 +74,13 @@ func (o *SubAgentOrchestrator) Delegate(
 		wg.Add(1)
 		go func(idx int, ts domain.DelegateTaskSpec) {
 			defer wg.Done()
-			task := o.runSubAgent(ctx, convID, parentID, ts)
+			var task domain.SubAgentTask
+			// Fast-path: if runtime=synapse and plugin specified, use Wasm directly
+			if ts.Runtime == "synapse" && ts.Plugin != "" && o.synapse != nil {
+				task = o.runWasmSubAgent(ctx, convID, parentID, ts)
+			} else {
+				task = o.runSubAgent(ctx, convID, parentID, ts)
+			}
 			mu.Lock()
 			results[idx] = task
 			mu.Unlock()
@@ -212,6 +222,93 @@ func (o *SubAgentOrchestrator) runSubAgent(
 	fin := time.Now()
 	task.FinishedAt = &fin
 	o.publishEvent(task, persona)
+	return task
+}
+
+// runWasmSubAgent executes a sub-agent task directly via a Synapse Wasm plugin.
+// This is the "fast path" — no LLM call, sub-millisecond startup, pure computation.
+// Used for brainstorming, text transforms, data validation, prompt variation, etc.
+func (o *SubAgentOrchestrator) runWasmSubAgent(
+	ctx context.Context,
+	convID domain.ConversationID,
+	parentID domain.SubAgentID,
+	spec domain.DelegateTaskSpec,
+) domain.SubAgentTask {
+	saID := domain.NewSubAgentID()
+	now := time.Now()
+
+	task := domain.SubAgentTask{
+		ID:             saID,
+		ParentID:       parentID,
+		ConversationID: convID,
+		Prompt:         spec.Prompt,
+		Status:         domain.SubAgentStatusRunning,
+		PersonaName:    "synapse:" + spec.Plugin,
+		ModelID:        "wasm",
+		StartedAt:      now,
+	}
+
+	// Register as active
+	o.mu.Lock()
+	o.active[saID] = &task
+	o.mu.Unlock()
+	defer func() {
+		o.mu.Lock()
+		delete(o.active, saID)
+		o.mu.Unlock()
+	}()
+
+	o.publishEvent(task, nil)
+	o.logger.Info("wasm sub-agent started",
+		"sa_id", string(saID),
+		"plugin", spec.Plugin,
+		"prompt", spec.Prompt[:min(80, len(spec.Prompt))],
+	)
+
+	// Execute the Wasm plugin
+	plugin, ok := o.synapse.GetPlugin(spec.Plugin)
+	if !ok {
+		task.Status = domain.SubAgentStatusFailed
+		task.Error = fmt.Sprintf("synapse plugin %q not found", spec.Plugin)
+		fin := time.Now()
+		task.FinishedAt = &fin
+		o.publishEvent(task, nil)
+		return task
+	}
+
+	// Build params from prompt
+	params := map[string]interface{}{
+		"input":  spec.Prompt,
+		"prompt": spec.Prompt,
+	}
+
+	result, err := plugin.Execute(ctx, params)
+	fin := time.Now()
+	task.FinishedAt = &fin
+
+	if err != nil {
+		task.Status = domain.SubAgentStatusFailed
+		task.Error = fmt.Sprintf("wasm execution failed: %v", err)
+		o.publishEvent(task, nil)
+		return task
+	}
+
+	resultJSON, _ := json.Marshal(result)
+	task.Status = domain.SubAgentStatusDone
+	task.Result = string(resultJSON)
+	task.Steps = []domain.ReActStep{{
+		Thought:       "Executing via Synapse Wasm fast-path",
+		IsFinalAnswer: true,
+		FinalAnswer:   string(resultJSON),
+	}}
+
+	o.publishEvent(task, nil)
+	o.logger.Info("wasm sub-agent completed",
+		"sa_id", string(saID),
+		"plugin", spec.Plugin,
+		"duration", time.Since(now).String(),
+	)
+
 	return task
 }
 

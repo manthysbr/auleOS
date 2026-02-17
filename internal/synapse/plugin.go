@@ -116,9 +116,10 @@ func (p *Plugin) Execute(ctx context.Context, params map[string]interface{}) (in
 // with the existing auleOS tool system.
 func (p *Plugin) AsTool() *domain.Tool {
 	return &domain.Tool{
-		Name:        p.meta.ToolName,
-		Description: p.meta.Description,
-		Parameters:  p.meta.Parameters,
+		Name:          p.meta.ToolName,
+		Description:   p.meta.Description,
+		Parameters:    p.meta.Parameters,
+		ExecutionType: domain.ExecWasm,
 		Execute: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 			return p.Execute(ctx, params)
 		},
