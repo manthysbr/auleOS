@@ -220,9 +220,20 @@ func run(logger *slog.Logger) error {
 	if err := toolRegistry.Register(execTool); err != nil {
 		logger.Error("failed to register exec tool", "error", err)
 	}
+	// Web Search Tool
+	if err := toolRegistry.Register(services.NewWebSearchTool()); err != nil {
+		logger.Error("failed to register web_search tool", "error", err)
+	}
+	// Memory Tools
+	if err := toolRegistry.Register(services.NewMemorySaveTool(workspaceMgr)); err != nil {
+		logger.Error("failed to register memory_save tool", "error", err)
+	}
+	if err := toolRegistry.Register(services.NewMemoryReadTool(workspaceMgr)); err != nil {
+		logger.Error("failed to register memory_read tool", "error", err)
+	}
 
 	// ReAct Agent Service - agentic reasoning with tools + model routing
-	reactAgent := services.NewReActAgentService(logger, llmProvider, modelRouter, toolRegistry, convStore, repo)
+	reactAgent := services.NewReActAgentService(logger, llmProvider, modelRouter, toolRegistry, convStore, repo, workspaceMgr)
 
 	// Seed built-in personas (idempotent — ON CONFLICT DO NOTHING)
 	for _, p := range domain.BuiltinPersonas() {

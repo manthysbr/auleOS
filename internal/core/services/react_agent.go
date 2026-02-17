@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -20,6 +22,7 @@ type ReActAgentService struct {
 	tools    *domain.ToolRegistry
 	convs    *ConversationStore
 	repo     personaReader
+	ws       *WorkspaceManager
 	maxIters int
 }
 
@@ -36,6 +39,7 @@ func NewReActAgentService(
 	tools *domain.ToolRegistry,
 	convs *ConversationStore,
 	repo personaReader,
+	ws *WorkspaceManager,
 ) *ReActAgentService {
 	return &ReActAgentService{
 		logger:   logger,
@@ -44,6 +48,7 @@ func NewReActAgentService(
 		tools:    tools,
 		convs:    convs,
 		repo:     repo,
+		ws:       ws,
 		maxIters: 5,
 	}
 }
@@ -94,6 +99,23 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 		return nil, convID, fmt.Errorf("persist user message: %w", err)
 	}
 
+	// Inject ProjectID into context and read MEMORY.md if available
+	var memoryContent string
+	if currentConv, err := s.convs.GetConversation(ctx, convID); err == nil && currentConv.ProjectID != nil {
+		projectID := *currentConv.ProjectID
+		ctx = ContextWithProject(ctx, projectID)
+		s.logger.Info("context injected with project_id", "project_id", string(projectID))
+
+		// Try to read MEMORY.md
+		if s.ws != nil {
+			memoryPath := filepath.Join(s.ws.GetProjectPath(string(projectID)), "MEMORY.md")
+			if data, err := os.ReadFile(memoryPath); err == nil && len(data) > 0 {
+				memoryContent = string(data)
+				s.logger.Info("memory injected", "bytes", len(data))
+			}
+		}
+	}
+
 	// Build context: system prompt + conversation history + new user message
 	history, err := s.convs.BuildContextWindow(ctx, convID, 20)
 	if err != nil {
@@ -101,7 +123,7 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 	}
 
 	conversationHistory := []string{
-		s.buildReActPrompt(history, message, persona),
+		s.buildReActPrompt(history, message, persona, memoryContent),
 	}
 	steps := []domain.ReActStep{}
 
@@ -120,14 +142,6 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 
 	// Inject conversation ID into context for sub-agent tools
 	ctx = ContextWithConversation(ctx, convID)
-
-	// Inject ProjectID into context if available
-	// Ensure we have the latest conversation state (although convID is usually sufficient, project might be loaded)
-	// We need to fetch the conversation metadata to get the ProjectID
-	if currentConv, err := s.convs.GetConversation(ctx, convID); err == nil && currentConv.ProjectID != nil {
-		ctx = ContextWithProject(ctx, *currentConv.ProjectID)
-		s.logger.Info("context injected with project_id", "project_id", string(*currentConv.ProjectID))
-	}
 
 	for i := 0; i < s.maxIters; i++ {
 		s.logger.Info("ReAct iteration", "iteration", i+1)
@@ -200,7 +214,7 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 }
 
 // buildReActPrompt creates the initial prompt with tool descriptions and conversation history
-func (s *ReActAgentService) buildReActPrompt(history string, userMessage string, persona *domain.Persona) string {
+func (s *ReActAgentService) buildReActPrompt(history string, userMessage string, persona *domain.Persona, memory string) string {
 	// Choose effective tool set for prompt
 	var toolsDesc string
 	if persona != nil && len(persona.AllowedTools) > 0 {
@@ -224,6 +238,15 @@ Previous conversation:
 `, history)
 	}
 
+	var memoryBlock string
+	if memory != "" {
+		memoryBlock = fmt.Sprintf(`
+LONG-TERM MEMORY (Facts/Preferences/Context):
+%s
+---
+`, memory)
+	}
+
 	return fmt.Sprintf(`%s
 
 You use the ReAct pattern: Thought → Action → Observation → ... → Final Answer.
@@ -239,6 +262,10 @@ Final Answer: <response>
 
 %s
 
+%s
+
+%s
+
 RULES:
 1. Always start with "Thought:"
 2. For simple chat (greetings, questions, conversation), go DIRECTLY to "Final Answer:" — no tools needed.
@@ -246,6 +273,7 @@ RULES:
 4. Tools generate_image and generate_text are ASYNC. When "status":"queued", tell user to wait.
 5. When "status":"unavailable", the service is down — tell user clearly.
 6. Action Input must be valid JSON on one line.
+7. CHECK MEMORY: If the user asks about something stored in LONG-TERM MEMORY, use it!
 
 Example 1 — simple chat:
 User: Hello!
@@ -257,9 +285,9 @@ User: Generate an image of a sunset
 Thought: I need to use generate_image for this request.
 Action: generate_image
 Action Input: {"prompt": "beautiful sunset over ocean"}
-%s
+
 Now respond to:
-User: %s`, systemIdentity, toolsDesc, historyBlock, userMessage)
+User: %s`, systemIdentity, toolsDesc, memoryBlock, historyBlock, userMessage)
 }
 
 // parseReActOutput extracts Thought/Action/ActionInput or FinalAnswer from LLM response
