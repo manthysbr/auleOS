@@ -24,6 +24,16 @@ import (
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
 )
 
+// Defines values for ArtifactType.
+const (
+	ArtifactTypeAudio    ArtifactType = "audio"
+	ArtifactTypeDocument ArtifactType = "document"
+	ArtifactTypeImage    ArtifactType = "image"
+	ArtifactTypeOther    ArtifactType = "other"
+	ArtifactTypeText     ArtifactType = "text"
+	ArtifactTypeVideo    ArtifactType = "video"
+)
+
 // Defines values for ConnectionTestResultStatus.
 const (
 	ConnectionTestResultStatusError ConnectionTestResultStatus = "error"
@@ -44,6 +54,16 @@ const (
 	Remote ProviderConfigMode = "remote"
 )
 
+// Defines values for ListArtifactsParamsType.
+const (
+	ListArtifactsParamsTypeAudio    ListArtifactsParamsType = "audio"
+	ListArtifactsParamsTypeDocument ListArtifactsParamsType = "document"
+	ListArtifactsParamsTypeImage    ListArtifactsParamsType = "image"
+	ListArtifactsParamsTypeOther    ListArtifactsParamsType = "other"
+	ListArtifactsParamsTypeText     ListArtifactsParamsType = "text"
+	ListArtifactsParamsTypeVideo    ListArtifactsParamsType = "video"
+)
+
 // Defines values for TestConnectionJSONBodyProvider.
 const (
 	Image TestConnectionJSONBodyProvider = "image"
@@ -58,12 +78,33 @@ type AppConfig struct {
 	} `json:"providers,omitempty"`
 }
 
+// Artifact defines model for Artifact.
+type Artifact struct {
+	ConversationId *string       `json:"conversation_id,omitempty"`
+	CreatedAt      *time.Time    `json:"created_at,omitempty"`
+	FilePath       *string       `json:"file_path,omitempty"`
+	Id             *string       `json:"id,omitempty"`
+	JobId          *string       `json:"job_id,omitempty"`
+	MimeType       *string       `json:"mime_type,omitempty"`
+	Name           *string       `json:"name,omitempty"`
+	ProjectId      *string       `json:"project_id,omitempty"`
+	Prompt         *string       `json:"prompt,omitempty"`
+	SizeBytes      *int64        `json:"size_bytes,omitempty"`
+	Type           *ArtifactType `json:"type,omitempty"`
+}
+
+// ArtifactType defines model for Artifact.Type.
+type ArtifactType string
+
 // ChatRequest defines model for ChatRequest.
 type ChatRequest struct {
 	// ConversationId Optional. If omitted, a new conversation is created automatically.
 	ConversationId *string `json:"conversation_id,omitempty"`
 	Message        string  `json:"message"`
 	Model          *string `json:"model,omitempty"`
+
+	// PersonaId Optional persona ID to use for this chat. Sets the agent personality and tool filter.
+	PersonaId *string `json:"persona_id,omitempty"`
 }
 
 // ChatResponse defines model for ChatResponse.
@@ -98,6 +139,12 @@ type ConnectionTestResultStatus string
 type Conversation struct {
 	CreatedAt *time.Time `json:"created_at,omitempty"`
 	Id        *string    `json:"id,omitempty"`
+
+	// PersonaId Optional persona used in this conversation
+	PersonaId *string `json:"persona_id,omitempty"`
+
+	// ProjectId Optional project this conversation belongs to
+	ProjectId *string    `json:"project_id,omitempty"`
 	Title     *string    `json:"title,omitempty"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
@@ -148,6 +195,34 @@ type Message struct {
 // MessageRole defines model for Message.Role.
 type MessageRole string
 
+// Persona defines model for Persona.
+type Persona struct {
+	// AllowedTools Tool names this persona can use. Empty means all tools.
+	AllowedTools *[]string `json:"allowed_tools,omitempty"`
+
+	// Color Tailwind color token (e.g. blue, emerald, violet)
+	Color       *string    `json:"color,omitempty"`
+	CreatedAt   *time.Time `json:"created_at,omitempty"`
+	Description *string    `json:"description,omitempty"`
+
+	// Icon Lucide icon name
+	Icon         *string    `json:"icon,omitempty"`
+	Id           *string    `json:"id,omitempty"`
+	IsBuiltin    *bool      `json:"is_builtin,omitempty"`
+	Name         *string    `json:"name,omitempty"`
+	SystemPrompt *string    `json:"system_prompt,omitempty"`
+	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
+}
+
+// Project defines model for Project.
+type Project struct {
+	CreatedAt   *time.Time `json:"created_at,omitempty"`
+	Description *string    `json:"description,omitempty"`
+	Id          *string    `json:"id,omitempty"`
+	Name        *string    `json:"name,omitempty"`
+	UpdatedAt   *time.Time `json:"updated_at,omitempty"`
+}
+
 // ProviderConfig defines model for ProviderConfig.
 type ProviderConfig struct {
 	// ApiKey Masked on read (****xxxx), plaintext on write. Empty string keeps existing.
@@ -179,6 +254,15 @@ type Resources struct {
 	MemoryMb *int     `json:"memory_mb,omitempty"`
 }
 
+// ListArtifactsParams defines parameters for ListArtifacts.
+type ListArtifactsParams struct {
+	// Type Filter by artifact type
+	Type *ListArtifactsParamsType `form:"type,omitempty" json:"type,omitempty"`
+}
+
+// ListArtifactsParamsType defines parameters for ListArtifacts.
+type ListArtifactsParamsType string
+
 // CreateConversationJSONBody defines parameters for CreateConversation.
 type CreateConversationJSONBody struct {
 	Title *string `json:"title,omitempty"`
@@ -192,6 +276,38 @@ type UpdateConversationJSONBody struct {
 // ListMessagesParams defines parameters for ListMessages.
 type ListMessagesParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreatePersonaJSONBody defines parameters for CreatePersona.
+type CreatePersonaJSONBody struct {
+	AllowedTools *[]string `json:"allowed_tools,omitempty"`
+	Color        *string   `json:"color,omitempty"`
+	Description  *string   `json:"description,omitempty"`
+	Icon         *string   `json:"icon,omitempty"`
+	Name         string    `json:"name"`
+	SystemPrompt string    `json:"system_prompt"`
+}
+
+// UpdatePersonaJSONBody defines parameters for UpdatePersona.
+type UpdatePersonaJSONBody struct {
+	AllowedTools *[]string `json:"allowed_tools,omitempty"`
+	Color        *string   `json:"color,omitempty"`
+	Description  *string   `json:"description,omitempty"`
+	Icon         *string   `json:"icon,omitempty"`
+	Name         *string   `json:"name,omitempty"`
+	SystemPrompt *string   `json:"system_prompt,omitempty"`
+}
+
+// CreateProjectJSONBody defines parameters for CreateProject.
+type CreateProjectJSONBody struct {
+	Description *string `json:"description,omitempty"`
+	Name        string  `json:"name"`
+}
+
+// UpdateProjectJSONBody defines parameters for UpdateProject.
+type UpdateProjectJSONBody struct {
+	Description *string `json:"description,omitempty"`
+	Name        *string `json:"name,omitempty"`
 }
 
 // TestConnectionJSONBody defines parameters for TestConnection.
@@ -214,6 +330,18 @@ type UpdateConversationJSONRequestBody UpdateConversationJSONBody
 // SubmitJobJSONRequestBody defines body for SubmitJob for application/json ContentType.
 type SubmitJobJSONRequestBody = JobRequest
 
+// CreatePersonaJSONRequestBody defines body for CreatePersona for application/json ContentType.
+type CreatePersonaJSONRequestBody CreatePersonaJSONBody
+
+// UpdatePersonaJSONRequestBody defines body for UpdatePersona for application/json ContentType.
+type UpdatePersonaJSONRequestBody UpdatePersonaJSONBody
+
+// CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
+type CreateProjectJSONRequestBody CreateProjectJSONBody
+
+// UpdateProjectJSONRequestBody defines body for UpdateProject for application/json ContentType.
+type UpdateProjectJSONRequestBody UpdateProjectJSONBody
+
 // UpdateSettingsJSONRequestBody defines body for UpdateSettings for application/json ContentType.
 type UpdateSettingsJSONRequestBody = AppConfig
 
@@ -225,6 +353,15 @@ type ServerInterface interface {
 	// Chat with the Agent
 	// (POST /v1/agent/chat)
 	AgentChat(w http.ResponseWriter, r *http.Request)
+	// List all artifacts
+	// (GET /v1/artifacts)
+	ListArtifacts(w http.ResponseWriter, r *http.Request, params ListArtifactsParams)
+	// Delete an artifact
+	// (DELETE /v1/artifacts/{id})
+	DeleteArtifact(w http.ResponseWriter, r *http.Request, id string)
+	// Get artifact details
+	// (GET /v1/artifacts/{id})
+	GetArtifact(w http.ResponseWriter, r *http.Request, id string)
 	// List all conversations
 	// (GET /v1/conversations)
 	ListConversations(w http.ResponseWriter, r *http.Request)
@@ -258,6 +395,42 @@ type ServerInterface interface {
 	// Stream job logs and status updates (SSE)
 	// (GET /v1/jobs/{id}/stream)
 	StreamJob(w http.ResponseWriter, r *http.Request, id string)
+	// List all personas
+	// (GET /v1/personas)
+	ListPersonas(w http.ResponseWriter, r *http.Request)
+	// Create a custom persona
+	// (POST /v1/personas)
+	CreatePersona(w http.ResponseWriter, r *http.Request)
+	// Delete a persona
+	// (DELETE /v1/personas/{id})
+	DeletePersona(w http.ResponseWriter, r *http.Request, id string)
+	// Get persona details
+	// (GET /v1/personas/{id})
+	GetPersona(w http.ResponseWriter, r *http.Request, id string)
+	// Update persona
+	// (PATCH /v1/personas/{id})
+	UpdatePersona(w http.ResponseWriter, r *http.Request, id string)
+	// List all projects
+	// (GET /v1/projects)
+	ListProjects(w http.ResponseWriter, r *http.Request)
+	// Create a new project
+	// (POST /v1/projects)
+	CreateProject(w http.ResponseWriter, r *http.Request)
+	// Delete a project
+	// (DELETE /v1/projects/{id})
+	DeleteProject(w http.ResponseWriter, r *http.Request, id string)
+	// Get project details
+	// (GET /v1/projects/{id})
+	GetProject(w http.ResponseWriter, r *http.Request, id string)
+	// Update project (name, description)
+	// (PATCH /v1/projects/{id})
+	UpdateProject(w http.ResponseWriter, r *http.Request, id string)
+	// List artifacts in a project
+	// (GET /v1/projects/{id}/artifacts)
+	ListProjectArtifacts(w http.ResponseWriter, r *http.Request, id string)
+	// List conversations in a project
+	// (GET /v1/projects/{id}/conversations)
+	ListProjectConversations(w http.ResponseWriter, r *http.Request, id string)
 	// Get current settings (secrets masked)
 	// (GET /v1/settings)
 	GetSettings(w http.ResponseWriter, r *http.Request)
@@ -283,6 +456,83 @@ func (siw *ServerInterfaceWrapper) AgentChat(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AgentChat(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListArtifacts operation middleware
+func (siw *ServerInterfaceWrapper) ListArtifacts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListArtifactsParams
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "type", r.URL.Query(), &params.Type)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "type", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListArtifacts(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteArtifact operation middleware
+func (siw *ServerInterfaceWrapper) DeleteArtifact(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteArtifact(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetArtifact operation middleware
+func (siw *ServerInterfaceWrapper) GetArtifact(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetArtifact(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -543,6 +793,262 @@ func (siw *ServerInterfaceWrapper) StreamJob(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// ListPersonas operation middleware
+func (siw *ServerInterfaceWrapper) ListPersonas(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPersonas(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreatePersona operation middleware
+func (siw *ServerInterfaceWrapper) CreatePersona(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePersona(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeletePersona operation middleware
+func (siw *ServerInterfaceWrapper) DeletePersona(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeletePersona(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPersona operation middleware
+func (siw *ServerInterfaceWrapper) GetPersona(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPersona(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdatePersona operation middleware
+func (siw *ServerInterfaceWrapper) UpdatePersona(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdatePersona(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListProjects operation middleware
+func (siw *ServerInterfaceWrapper) ListProjects(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListProjects(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateProject operation middleware
+func (siw *ServerInterfaceWrapper) CreateProject(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateProject(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteProject operation middleware
+func (siw *ServerInterfaceWrapper) DeleteProject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteProject(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProject operation middleware
+func (siw *ServerInterfaceWrapper) GetProject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProject(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateProject operation middleware
+func (siw *ServerInterfaceWrapper) UpdateProject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateProject(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListProjectArtifacts operation middleware
+func (siw *ServerInterfaceWrapper) ListProjectArtifacts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListProjectArtifacts(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListProjectConversations operation middleware
+func (siw *ServerInterfaceWrapper) ListProjectConversations(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListProjectConversations(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetSettings operation middleware
 func (siw *ServerInterfaceWrapper) GetSettings(w http.ResponseWriter, r *http.Request) {
 
@@ -706,6 +1212,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc("POST "+options.BaseURL+"/v1/agent/chat", wrapper.AgentChat)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/artifacts", wrapper.ListArtifacts)
+	m.HandleFunc("DELETE "+options.BaseURL+"/v1/artifacts/{id}", wrapper.DeleteArtifact)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/artifacts/{id}", wrapper.GetArtifact)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/conversations", wrapper.ListConversations)
 	m.HandleFunc("POST "+options.BaseURL+"/v1/conversations", wrapper.CreateConversation)
 	m.HandleFunc("DELETE "+options.BaseURL+"/v1/conversations/{id}", wrapper.DeleteConversation)
@@ -717,6 +1226,18 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs/{id}", wrapper.GetJob)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs/{id}/files/{filename}", wrapper.ServeJobFile)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/jobs/{id}/stream", wrapper.StreamJob)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/personas", wrapper.ListPersonas)
+	m.HandleFunc("POST "+options.BaseURL+"/v1/personas", wrapper.CreatePersona)
+	m.HandleFunc("DELETE "+options.BaseURL+"/v1/personas/{id}", wrapper.DeletePersona)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/personas/{id}", wrapper.GetPersona)
+	m.HandleFunc("PATCH "+options.BaseURL+"/v1/personas/{id}", wrapper.UpdatePersona)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/projects", wrapper.ListProjects)
+	m.HandleFunc("POST "+options.BaseURL+"/v1/projects", wrapper.CreateProject)
+	m.HandleFunc("DELETE "+options.BaseURL+"/v1/projects/{id}", wrapper.DeleteProject)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/projects/{id}", wrapper.GetProject)
+	m.HandleFunc("PATCH "+options.BaseURL+"/v1/projects/{id}", wrapper.UpdateProject)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/projects/{id}/artifacts", wrapper.ListProjectArtifacts)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/projects/{id}/conversations", wrapper.ListProjectConversations)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/settings", wrapper.GetSettings)
 	m.HandleFunc("PUT "+options.BaseURL+"/v1/settings", wrapper.UpdateSettings)
 	m.HandleFunc("POST "+options.BaseURL+"/v1/settings/test", wrapper.TestConnection)
@@ -746,6 +1267,73 @@ type AgentChat500JSONResponse Error
 func (response AgentChat500JSONResponse) VisitAgentChatResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListArtifactsRequestObject struct {
+	Params ListArtifactsParams
+}
+
+type ListArtifactsResponseObject interface {
+	VisitListArtifactsResponse(w http.ResponseWriter) error
+}
+
+type ListArtifacts200JSONResponse []Artifact
+
+func (response ListArtifacts200JSONResponse) VisitListArtifactsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteArtifactRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteArtifactResponseObject interface {
+	VisitDeleteArtifactResponse(w http.ResponseWriter) error
+}
+
+type DeleteArtifact204Response struct {
+}
+
+func (response DeleteArtifact204Response) VisitDeleteArtifactResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteArtifact404Response struct {
+}
+
+func (response DeleteArtifact404Response) VisitDeleteArtifactResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
+	return nil
+}
+
+type GetArtifactRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetArtifactResponseObject interface {
+	VisitGetArtifactResponse(w http.ResponseWriter) error
+}
+
+type GetArtifact200JSONResponse Artifact
+
+func (response GetArtifact200JSONResponse) VisitGetArtifactResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetArtifact404JSONResponse Error
+
+func (response GetArtifact404JSONResponse) VisitGetArtifactResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -1034,6 +1622,260 @@ func (response StreamJob404Response) VisitStreamJobResponse(w http.ResponseWrite
 	return nil
 }
 
+type ListPersonasRequestObject struct {
+}
+
+type ListPersonasResponseObject interface {
+	VisitListPersonasResponse(w http.ResponseWriter) error
+}
+
+type ListPersonas200JSONResponse []Persona
+
+func (response ListPersonas200JSONResponse) VisitListPersonasResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreatePersonaRequestObject struct {
+	Body *CreatePersonaJSONRequestBody
+}
+
+type CreatePersonaResponseObject interface {
+	VisitCreatePersonaResponse(w http.ResponseWriter) error
+}
+
+type CreatePersona201JSONResponse Persona
+
+func (response CreatePersona201JSONResponse) VisitCreatePersonaResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeletePersonaRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeletePersonaResponseObject interface {
+	VisitDeletePersonaResponse(w http.ResponseWriter) error
+}
+
+type DeletePersona204Response struct {
+}
+
+func (response DeletePersona204Response) VisitDeletePersonaResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeletePersona404Response struct {
+}
+
+func (response DeletePersona404Response) VisitDeletePersonaResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
+	return nil
+}
+
+type GetPersonaRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetPersonaResponseObject interface {
+	VisitGetPersonaResponse(w http.ResponseWriter) error
+}
+
+type GetPersona200JSONResponse Persona
+
+func (response GetPersona200JSONResponse) VisitGetPersonaResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetPersona404JSONResponse Error
+
+func (response GetPersona404JSONResponse) VisitGetPersonaResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdatePersonaRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdatePersonaJSONRequestBody
+}
+
+type UpdatePersonaResponseObject interface {
+	VisitUpdatePersonaResponse(w http.ResponseWriter) error
+}
+
+type UpdatePersona200JSONResponse Persona
+
+func (response UpdatePersona200JSONResponse) VisitUpdatePersonaResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdatePersona404JSONResponse Error
+
+func (response UpdatePersona404JSONResponse) VisitUpdatePersonaResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListProjectsRequestObject struct {
+}
+
+type ListProjectsResponseObject interface {
+	VisitListProjectsResponse(w http.ResponseWriter) error
+}
+
+type ListProjects200JSONResponse []Project
+
+func (response ListProjects200JSONResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateProjectRequestObject struct {
+	Body *CreateProjectJSONRequestBody
+}
+
+type CreateProjectResponseObject interface {
+	VisitCreateProjectResponse(w http.ResponseWriter) error
+}
+
+type CreateProject201JSONResponse Project
+
+func (response CreateProject201JSONResponse) VisitCreateProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteProjectRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteProjectResponseObject interface {
+	VisitDeleteProjectResponse(w http.ResponseWriter) error
+}
+
+type DeleteProject204Response struct {
+}
+
+func (response DeleteProject204Response) VisitDeleteProjectResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteProject404Response struct {
+}
+
+func (response DeleteProject404Response) VisitDeleteProjectResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
+	return nil
+}
+
+type GetProjectRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetProjectResponseObject interface {
+	VisitGetProjectResponse(w http.ResponseWriter) error
+}
+
+type GetProject200JSONResponse Project
+
+func (response GetProject200JSONResponse) VisitGetProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetProject404JSONResponse Error
+
+func (response GetProject404JSONResponse) VisitGetProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateProjectRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateProjectJSONRequestBody
+}
+
+type UpdateProjectResponseObject interface {
+	VisitUpdateProjectResponse(w http.ResponseWriter) error
+}
+
+type UpdateProject200JSONResponse Project
+
+func (response UpdateProject200JSONResponse) VisitUpdateProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateProject404JSONResponse Error
+
+func (response UpdateProject404JSONResponse) VisitUpdateProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListProjectArtifactsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListProjectArtifactsResponseObject interface {
+	VisitListProjectArtifactsResponse(w http.ResponseWriter) error
+}
+
+type ListProjectArtifacts200JSONResponse []Artifact
+
+func (response ListProjectArtifacts200JSONResponse) VisitListProjectArtifactsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListProjectConversationsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListProjectConversationsResponseObject interface {
+	VisitListProjectConversationsResponse(w http.ResponseWriter) error
+}
+
+type ListProjectConversations200JSONResponse []Conversation
+
+func (response ListProjectConversations200JSONResponse) VisitListProjectConversationsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetSettingsRequestObject struct {
 }
 
@@ -1098,6 +1940,15 @@ type StrictServerInterface interface {
 	// Chat with the Agent
 	// (POST /v1/agent/chat)
 	AgentChat(ctx context.Context, request AgentChatRequestObject) (AgentChatResponseObject, error)
+	// List all artifacts
+	// (GET /v1/artifacts)
+	ListArtifacts(ctx context.Context, request ListArtifactsRequestObject) (ListArtifactsResponseObject, error)
+	// Delete an artifact
+	// (DELETE /v1/artifacts/{id})
+	DeleteArtifact(ctx context.Context, request DeleteArtifactRequestObject) (DeleteArtifactResponseObject, error)
+	// Get artifact details
+	// (GET /v1/artifacts/{id})
+	GetArtifact(ctx context.Context, request GetArtifactRequestObject) (GetArtifactResponseObject, error)
 	// List all conversations
 	// (GET /v1/conversations)
 	ListConversations(ctx context.Context, request ListConversationsRequestObject) (ListConversationsResponseObject, error)
@@ -1131,6 +1982,42 @@ type StrictServerInterface interface {
 	// Stream job logs and status updates (SSE)
 	// (GET /v1/jobs/{id}/stream)
 	StreamJob(ctx context.Context, request StreamJobRequestObject) (StreamJobResponseObject, error)
+	// List all personas
+	// (GET /v1/personas)
+	ListPersonas(ctx context.Context, request ListPersonasRequestObject) (ListPersonasResponseObject, error)
+	// Create a custom persona
+	// (POST /v1/personas)
+	CreatePersona(ctx context.Context, request CreatePersonaRequestObject) (CreatePersonaResponseObject, error)
+	// Delete a persona
+	// (DELETE /v1/personas/{id})
+	DeletePersona(ctx context.Context, request DeletePersonaRequestObject) (DeletePersonaResponseObject, error)
+	// Get persona details
+	// (GET /v1/personas/{id})
+	GetPersona(ctx context.Context, request GetPersonaRequestObject) (GetPersonaResponseObject, error)
+	// Update persona
+	// (PATCH /v1/personas/{id})
+	UpdatePersona(ctx context.Context, request UpdatePersonaRequestObject) (UpdatePersonaResponseObject, error)
+	// List all projects
+	// (GET /v1/projects)
+	ListProjects(ctx context.Context, request ListProjectsRequestObject) (ListProjectsResponseObject, error)
+	// Create a new project
+	// (POST /v1/projects)
+	CreateProject(ctx context.Context, request CreateProjectRequestObject) (CreateProjectResponseObject, error)
+	// Delete a project
+	// (DELETE /v1/projects/{id})
+	DeleteProject(ctx context.Context, request DeleteProjectRequestObject) (DeleteProjectResponseObject, error)
+	// Get project details
+	// (GET /v1/projects/{id})
+	GetProject(ctx context.Context, request GetProjectRequestObject) (GetProjectResponseObject, error)
+	// Update project (name, description)
+	// (PATCH /v1/projects/{id})
+	UpdateProject(ctx context.Context, request UpdateProjectRequestObject) (UpdateProjectResponseObject, error)
+	// List artifacts in a project
+	// (GET /v1/projects/{id}/artifacts)
+	ListProjectArtifacts(ctx context.Context, request ListProjectArtifactsRequestObject) (ListProjectArtifactsResponseObject, error)
+	// List conversations in a project
+	// (GET /v1/projects/{id}/conversations)
+	ListProjectConversations(ctx context.Context, request ListProjectConversationsRequestObject) (ListProjectConversationsResponseObject, error)
 	// Get current settings (secrets masked)
 	// (GET /v1/settings)
 	GetSettings(ctx context.Context, request GetSettingsRequestObject) (GetSettingsResponseObject, error)
@@ -1195,6 +2082,84 @@ func (sh *strictHandler) AgentChat(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(AgentChatResponseObject); ok {
 		if err := validResponse.VisitAgentChatResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListArtifacts operation middleware
+func (sh *strictHandler) ListArtifacts(w http.ResponseWriter, r *http.Request, params ListArtifactsParams) {
+	var request ListArtifactsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListArtifacts(ctx, request.(ListArtifactsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListArtifacts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListArtifactsResponseObject); ok {
+		if err := validResponse.VisitListArtifactsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteArtifact operation middleware
+func (sh *strictHandler) DeleteArtifact(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteArtifactRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteArtifact(ctx, request.(DeleteArtifactRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteArtifact")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteArtifactResponseObject); ok {
+		if err := validResponse.VisitDeleteArtifactResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetArtifact operation middleware
+func (sh *strictHandler) GetArtifact(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetArtifactRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetArtifact(ctx, request.(GetArtifactRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetArtifact")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetArtifactResponseObject); ok {
+		if err := validResponse.VisitGetArtifactResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -1503,6 +2468,338 @@ func (sh *strictHandler) StreamJob(w http.ResponseWriter, r *http.Request, id st
 	}
 }
 
+// ListPersonas operation middleware
+func (sh *strictHandler) ListPersonas(w http.ResponseWriter, r *http.Request) {
+	var request ListPersonasRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPersonas(ctx, request.(ListPersonasRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPersonas")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPersonasResponseObject); ok {
+		if err := validResponse.VisitListPersonasResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreatePersona operation middleware
+func (sh *strictHandler) CreatePersona(w http.ResponseWriter, r *http.Request) {
+	var request CreatePersonaRequestObject
+
+	var body CreatePersonaJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreatePersona(ctx, request.(CreatePersonaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreatePersona")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreatePersonaResponseObject); ok {
+		if err := validResponse.VisitCreatePersonaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeletePersona operation middleware
+func (sh *strictHandler) DeletePersona(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeletePersonaRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeletePersona(ctx, request.(DeletePersonaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeletePersona")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeletePersonaResponseObject); ok {
+		if err := validResponse.VisitDeletePersonaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPersona operation middleware
+func (sh *strictHandler) GetPersona(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetPersonaRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPersona(ctx, request.(GetPersonaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPersona")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPersonaResponseObject); ok {
+		if err := validResponse.VisitGetPersonaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdatePersona operation middleware
+func (sh *strictHandler) UpdatePersona(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdatePersonaRequestObject
+
+	request.Id = id
+
+	var body UpdatePersonaJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdatePersona(ctx, request.(UpdatePersonaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdatePersona")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdatePersonaResponseObject); ok {
+		if err := validResponse.VisitUpdatePersonaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListProjects operation middleware
+func (sh *strictHandler) ListProjects(w http.ResponseWriter, r *http.Request) {
+	var request ListProjectsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListProjects(ctx, request.(ListProjectsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListProjects")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListProjectsResponseObject); ok {
+		if err := validResponse.VisitListProjectsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateProject operation middleware
+func (sh *strictHandler) CreateProject(w http.ResponseWriter, r *http.Request) {
+	var request CreateProjectRequestObject
+
+	var body CreateProjectJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateProject(ctx, request.(CreateProjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateProject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateProjectResponseObject); ok {
+		if err := validResponse.VisitCreateProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteProject operation middleware
+func (sh *strictHandler) DeleteProject(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteProjectRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteProject(ctx, request.(DeleteProjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteProject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteProjectResponseObject); ok {
+		if err := validResponse.VisitDeleteProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetProject operation middleware
+func (sh *strictHandler) GetProject(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetProjectRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetProject(ctx, request.(GetProjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetProject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetProjectResponseObject); ok {
+		if err := validResponse.VisitGetProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateProject operation middleware
+func (sh *strictHandler) UpdateProject(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateProjectRequestObject
+
+	request.Id = id
+
+	var body UpdateProjectJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateProject(ctx, request.(UpdateProjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateProject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateProjectResponseObject); ok {
+		if err := validResponse.VisitUpdateProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListProjectArtifacts operation middleware
+func (sh *strictHandler) ListProjectArtifacts(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListProjectArtifactsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListProjectArtifacts(ctx, request.(ListProjectArtifactsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListProjectArtifacts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListProjectArtifactsResponseObject); ok {
+		if err := validResponse.VisitListProjectArtifactsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListProjectConversations operation middleware
+func (sh *strictHandler) ListProjectConversations(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListProjectConversationsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListProjectConversations(ctx, request.(ListProjectConversationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListProjectConversations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListProjectConversationsResponseObject); ok {
+		if err := validResponse.VisitListProjectConversationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetSettings operation middleware
 func (sh *strictHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
 	var request GetSettingsRequestObject
@@ -1592,39 +2889,53 @@ func (sh *strictHandler) TestConnection(w http.ResponseWriter, r *http.Request) 
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"H4sIAAAAAAAC/8xaXVPbPBb+KxrtzgAdE8NL35vcsbTbhd3STmn3vShMRrFPEhVZcqVjIMPkv+9I8mcs",
-	"p9ANaa8I1pF0znkenQ/ZjzRRWa4kSDR0/EhNsoCMuZ+neX6m5IzP7T+5Vjlo5GDK/+54Ctr0h3jG5mB/",
-	"/F3DjI7p3+Jmg7hcPf5Yzi/XX0VUiOy5k1YRxWUOdEzV9BskGHoS0bMFw0/wvQCDfWUTJe9AG4ZcyQlP",
-	"7aMUTKJ5bp/QMf3gfjAxIuczojKOCGlEGJFwT9qTCTck0cAQUsIKVBlDnjAhliNa62RQc+mMzcCY0kvw",
-	"wLJc2OFPhSSM5EtcKEm8DgQXDEmuuURDFiCECq6mUhDdtYRgGTvpC68iquF7wTWkdPy11uNm0G8mV9LA",
-	"Tzju8wK6DsIFN6TckExBKDk3BIMG6da2vUGDkHuiIWTmR5z5BKcJXiHktOEG05ot3f8LVcwX2Ff+bMG4",
-	"JGpGSgmiNNHAjJJczglqlkBIb1RKTCzqfX8xPTctcxo3S5aF7Hwit5WUkFilP4OxaBUiQPIW24LcGRwQ",
-	"wZHq7A+gw7Bwu4IsMssxdUsjClor3aJZM6HQ4knmO2NrNgUI6Q/fhDkHzJTO7C+aMoRD5FkQL8/bPowc",
-	"RdgpRZ4+c5OQIW+dM3oWQPX4CUtcqOl2XDC06aBzdE2yDdg/zYINUTnLmEw7Ie0r9ZGRRvQwoZaFXOL+",
-	"3r9sUCR/KS3SvQNLsDoq9GFdO/0g79zJTFPuY/zHjhJD8xsT6kzXxF2v4/hkdHx0aATPBqKbKnQCT4hd",
-	"leB63PY7R7WjboYcPBS+B8B9FoLvm7DSyw0IMsyRQN7oy2zvKGvlT3IVjAoDmkaUGcMNMok0omZpEBxQ",
-	"SolgiHqZjPPrs8daPdXfNeeTW1j20+N7Zm4hJUrapJiS/VevXr16eHh4OIhILhiXCA9oR+81RxiRt1mO",
-	"S+J1I7cAuSHwwA1yOQ9WRynMWCFwEqhr5pBl7GR8/Mc0NFGohIlJmVGaSQvEfBzHbnShDI6Pj1+fvI7v",
-	"joeKqb7Fe27yHpkpTT644io+U9ls+eU8InsaMoVQDuYgT88PLS8Y8qkAcvrx3CbAkoBuHWpPs50TpJsf",
-	"CpthxnHMcj5SOUjGR4nKgmaE0G542Qc6qXJqTxk/NOEyL3A4WqIuILDljEsmJkya+4FqgZvJgMxUKQFM",
-	"WiE1NaDv2KCKw2cq7IZW9F2LW3nRWkQW2RS0r9YzpZeTbNoatSSf2+HAUbOGyZnqs+j047kjCS6AsELA",
-	"hyvyb9ASRESYEOreng9TTG2XYX9+U1NDmEzt0QGW2UdCzY07M75EoZ1VSqrZ+Or3Oxodj46cCy1dck7H",
-	"9GR0NLJ9Qc5w4YyO745jNgeJcbLwATdXPidb1zivn6dWdytjewLqUxEY/IdKl2vxnuW54ImbFX8zHjAf",
-	"GH8UNttt2qqb7yy7Wl2BU/uPo6Mtb12mSrf3GmzWdNJIRPTPLe7uq8HAtucSQUsmiKU/aAKlYERNkWVM",
-	"L32jguSe48JxyinqJCyq7VTrfDaHAK7/4QbPOpL/p6eflCQ7tXwvT/Z9YbW0/VjXpq4vnAwTYl0oGmD0",
-	"mSszOpr8PLW7kaTuIJrofQn3pDw+P07WT6D/8fbo38Gi7/v2eHXHsU5D9zRwLRImY/zI05UPjwIQ+tC8",
-	"cc/XoMmZZhmgu3T6+ki51c2GMVqVQbYIXHdc1HLCut9vek593Y/ZXpXU0uh1aPxSIZmpQq67xM8jbM0d",
-	"UfgUvgPcvbVHv4ZCKSDjwrQ8+rJxtLO5HIDrHWD3uqqlZc4wWfQx++IuA3YC21Zj0lbCz+64492c9sNK",
-	"A54X6eK3D6P5iDijDzZEobi8HNucIN9XQi8AcFQu8r0AvWxWETzjrj2tJ5ZtER3/eRT1y9CbXaTtquV/",
-	"Rsau/RtI1tUY4bIXKEvEbA28EZoLK7AL2y/U9Dl2O8V/p1KxLo8qzcJV0ZXrP6yxL1Pnt+79dlzntC/E",
-	"Aj68UNP6DY4pkgSMmRVCLH2e2gmId0zw1OJDTA4Jn5Ub/FY08vwoSz3rs/3Tv74cdM5rXd4NlTqeXWuR",
-	"tI/G+Rsa/eaFjwsKYS692XGZY/fcVN0UBrTjVl3ZrEMWz7gAEz/aP9bVwxheWX5cqOk/uYCXzIndRSq9",
-	"XhB9lSDgob9v6WJSX0NPuWQuUa/v1EPk8wKI1ZlUmw31ENaNbezq4/4Tx9MOEeb3TbmGBMWSzLTK3A2B",
-	"xf9e6VuTswQCDGgsD+Puhn+344vwgDHcgQwj1/TgTmZM/FuOa5kyZGPyeF2+9rimY3JNP325vDy/fHdN",
-	"V9fyWpYzhJq3xAWX4IXPVJZzweV8NBq5GU+hxVu7ZnmnN0iJTafZo+CwFGpeXRFaE4h/QWnI/tXV2yYo",
-	"G3AXimZTTL6qZF4wWjYflITatEJr65jW8qRWPNCsleKVCNk3kGhAQzL3duLAlTgFDvVtHXu3X+asmbq7",
-	"dmqjj6teaqPTdlLs/NeWOh7kUBgrO7pGT5CJXuZoSKUwQ6LBYJ/kMVbvlIP17Wdw953lZxNbu/FrfxRR",
-	"v+sRGa3eEt/86FOceoGbX9+P978pCV+rlHLEepzoSrKNo12CVKbZPFj5fbVarf4XAAD//8aSg2Z7JgAA",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

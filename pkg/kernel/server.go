@@ -25,9 +25,28 @@ type Server struct {
 	workerMgr    interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	}
-	repo interface { // Minimal repo interface needed for queries
+	repo interface {
 		GetJob(ctx context.Context, id domain.JobID) (domain.Job, error)
 		ListJobs(ctx context.Context) ([]domain.Job, error)
+		// Projects
+		CreateProject(ctx context.Context, proj domain.Project) error
+		GetProject(ctx context.Context, id domain.ProjectID) (domain.Project, error)
+		ListProjects(ctx context.Context) ([]domain.Project, error)
+		UpdateProject(ctx context.Context, proj domain.Project) error
+		DeleteProject(ctx context.Context, id domain.ProjectID) error
+		ListProjectConversations(ctx context.Context, projectID domain.ProjectID) ([]domain.Conversation, error)
+		// Artifacts
+		SaveArtifact(ctx context.Context, art domain.Artifact) error
+		GetArtifact(ctx context.Context, id domain.ArtifactID) (domain.Artifact, error)
+		ListArtifacts(ctx context.Context) ([]domain.Artifact, error)
+		ListProjectArtifacts(ctx context.Context, projectID domain.ProjectID) ([]domain.Artifact, error)
+		DeleteArtifact(ctx context.Context, id domain.ArtifactID) error
+		// Personas
+		CreatePersona(ctx context.Context, p domain.Persona) error
+		GetPersona(ctx context.Context, id domain.PersonaID) (domain.Persona, error)
+		ListPersonas(ctx context.Context) ([]domain.Persona, error)
+		UpdatePersona(ctx context.Context, p domain.Persona) error
+		DeletePersona(ctx context.Context, id domain.PersonaID) error
 	}
 }
 
@@ -48,6 +67,22 @@ func NewServer(
 	repo interface {
 		GetJob(ctx context.Context, id domain.JobID) (domain.Job, error)
 		ListJobs(ctx context.Context) ([]domain.Job, error)
+		CreateProject(ctx context.Context, proj domain.Project) error
+		GetProject(ctx context.Context, id domain.ProjectID) (domain.Project, error)
+		ListProjects(ctx context.Context) ([]domain.Project, error)
+		UpdateProject(ctx context.Context, proj domain.Project) error
+		DeleteProject(ctx context.Context, id domain.ProjectID) error
+		ListProjectConversations(ctx context.Context, projectID domain.ProjectID) ([]domain.Conversation, error)
+		SaveArtifact(ctx context.Context, art domain.Artifact) error
+		GetArtifact(ctx context.Context, id domain.ArtifactID) (domain.Artifact, error)
+		ListArtifacts(ctx context.Context) ([]domain.Artifact, error)
+		ListProjectArtifacts(ctx context.Context, projectID domain.ProjectID) ([]domain.Artifact, error)
+		DeleteArtifact(ctx context.Context, id domain.ArtifactID) error
+		CreatePersona(ctx context.Context, p domain.Persona) error
+		GetPersona(ctx context.Context, id domain.PersonaID) (domain.Persona, error)
+		ListPersonas(ctx context.Context) ([]domain.Persona, error)
+		UpdatePersona(ctx context.Context, p domain.Persona) error
+		DeletePersona(ctx context.Context, id domain.PersonaID) error
 	}) *Server {
 	return &Server{
 		logger:       logger,
@@ -257,6 +292,12 @@ func (s *Server) AgentChat(ctx context.Context, request AgentChatRequestObject) 
 		convID = domain.ConversationID(*request.Body.ConversationId)
 	}
 
+	var personaID *domain.PersonaID
+	if request.Body.PersonaId != nil {
+		pid := domain.PersonaID(*request.Body.PersonaId)
+		personaID = &pid
+	}
+
 	var (
 		thought        string
 		response       string
@@ -269,7 +310,7 @@ func (s *Server) AgentChat(ctx context.Context, request AgentChatRequestObject) 
 	)
 
 	if s.reactAgent != nil {
-		reactResp, retConvID, err := s.reactAgent.Chat(ctx, convID, msg)
+		reactResp, retConvID, err := s.reactAgent.Chat(ctx, convID, msg, personaID)
 		if err != nil {
 			s.logger.Error("react agent chat failed", "error", err)
 			errMsg := err.Error()

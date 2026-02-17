@@ -37,9 +37,15 @@ func NewConversationStore(repo ports.Repository, maxCache int) *ConversationStor
 
 // CreateConversation initializes a new conversation. Returns its ID.
 func (s *ConversationStore) CreateConversation(ctx context.Context, title string) (domain.Conversation, error) {
+	return s.CreateConversationWithPersona(ctx, title, nil)
+}
+
+// CreateConversationWithPersona initializes a new conversation with an optional persona. Returns its ID.
+func (s *ConversationStore) CreateConversationWithPersona(ctx context.Context, title string, personaID *domain.PersonaID) (domain.Conversation, error) {
 	now := time.Now()
 	conv := domain.Conversation{
 		ID:        domain.NewConversationID(),
+		PersonaID: personaID,
 		Title:     title,
 		CreatedAt: now,
 		UpdatedAt: now,

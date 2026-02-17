@@ -80,6 +80,38 @@ func (r *Repository) migrate() error {
 			metadata JSON,
 			created_at TIMESTAMP NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS projects (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS artifacts (
+			id TEXT PRIMARY KEY,
+			project_id TEXT,
+			job_id TEXT,
+			conversation_id TEXT,
+			type TEXT NOT NULL DEFAULT 'other',
+			name TEXT NOT NULL DEFAULT '',
+			file_path TEXT NOT NULL,
+			mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+			size_bytes BIGINT NOT NULL DEFAULT 0,
+			prompt TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS personas (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			system_prompt TEXT NOT NULL DEFAULT '',
+			icon TEXT NOT NULL DEFAULT 'bot',
+			color TEXT NOT NULL DEFAULT 'blue',
+			allowed_tools JSON,
+			is_builtin BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);`,
 	}
 
 	for _, q := range queries {
@@ -87,6 +119,16 @@ func (r *Repository) migrate() error {
 			return err
 		}
 	}
+
+	// Additive migrations — safe to re-run
+	migrations := []string{
+		`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS project_id TEXT`,
+		`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS persona_id TEXT`,
+	}
+	for _, m := range migrations {
+		_, _ = r.db.Exec(m) // ignore errors; DuckDB may not support IF NOT EXISTS on ALTER
+	}
+
 	return nil
 }
 
@@ -326,9 +368,14 @@ func (r *Repository) ListJobs(ctx context.Context) ([]domain.Job, error) {
 // Conversation Management
 
 func (r *Repository) CreateConversation(ctx context.Context, conv domain.Conversation) error {
+	var personaID *string
+	if conv.PersonaID != nil {
+		s := string(*conv.PersonaID)
+		personaID = &s
+	}
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-		conv.ID, conv.Title, conv.CreatedAt, conv.UpdatedAt,
+		`INSERT INTO conversations (id, title, persona_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		conv.ID, conv.Title, personaID, conv.CreatedAt, conv.UpdatedAt,
 	)
 	return err
 }
@@ -336,9 +383,10 @@ func (r *Repository) CreateConversation(ctx context.Context, conv domain.Convers
 func (r *Repository) GetConversation(ctx context.Context, id domain.ConversationID) (domain.Conversation, error) {
 	var c domain.Conversation
 	var idStr string
+	var personaID *string
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, title, created_at, updated_at FROM conversations WHERE id = ?`, id,
-	).Scan(&idStr, &c.Title, &c.CreatedAt, &c.UpdatedAt)
+		`SELECT id, title, persona_id, created_at, updated_at FROM conversations WHERE id = ?`, id,
+	).Scan(&idStr, &c.Title, &personaID, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return domain.Conversation{}, domain.ErrConversationNotFound
@@ -346,12 +394,16 @@ func (r *Repository) GetConversation(ctx context.Context, id domain.Conversation
 		return domain.Conversation{}, err
 	}
 	c.ID = domain.ConversationID(idStr)
+	if personaID != nil {
+		pid := domain.PersonaID(*personaID)
+		c.PersonaID = &pid
+	}
 	return c, nil
 }
 
 func (r *Repository) ListConversations(ctx context.Context) ([]domain.Conversation, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC`,
+		`SELECT id, title, persona_id, created_at, updated_at FROM conversations ORDER BY updated_at DESC`,
 	)
 	if err != nil {
 		return nil, err
@@ -362,10 +414,15 @@ func (r *Repository) ListConversations(ctx context.Context) ([]domain.Conversati
 	for rows.Next() {
 		var c domain.Conversation
 		var idStr string
-		if err := rows.Scan(&idStr, &c.Title, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		var personaID *string
+		if err := rows.Scan(&idStr, &c.Title, &personaID, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		c.ID = domain.ConversationID(idStr)
+		if personaID != nil {
+			pid := domain.PersonaID(*personaID)
+			c.PersonaID = &pid
+		}
 		convs = append(convs, c)
 	}
 	return convs, nil
@@ -457,4 +514,325 @@ func (r *Repository) ListMessages(ctx context.Context, convID domain.Conversatio
 		msgs = append(msgs, m)
 	}
 	return msgs, nil
+}
+
+// --- Project Management ---
+
+func (r *Repository) CreateProject(ctx context.Context, proj domain.Project) error {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO projects (id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		proj.ID, proj.Name, proj.Description, proj.CreatedAt, proj.UpdatedAt,
+	)
+	return err
+}
+
+func (r *Repository) GetProject(ctx context.Context, id domain.ProjectID) (domain.Project, error) {
+	var p domain.Project
+	var idStr string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, name, description, created_at, updated_at FROM projects WHERE id = ?`, id,
+	).Scan(&idStr, &p.Name, &p.Description, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return domain.Project{}, domain.ErrProjectNotFound
+		}
+		return domain.Project{}, err
+	}
+	p.ID = domain.ProjectID(idStr)
+	return p, nil
+}
+
+func (r *Repository) ListProjects(ctx context.Context) ([]domain.Project, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, name, description, created_at, updated_at FROM projects ORDER BY updated_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var projects []domain.Project
+	for rows.Next() {
+		var p domain.Project
+		var idStr string
+		if err := rows.Scan(&idStr, &p.Name, &p.Description, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		p.ID = domain.ProjectID(idStr)
+		projects = append(projects, p)
+	}
+	return projects, nil
+}
+
+func (r *Repository) UpdateProject(ctx context.Context, proj domain.Project) error {
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE projects SET name = ?, description = ?, updated_at = ? WHERE id = ?`,
+		proj.Name, proj.Description, proj.UpdatedAt, proj.ID,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return domain.ErrProjectNotFound
+	}
+	return nil
+}
+
+func (r *Repository) DeleteProject(ctx context.Context, id domain.ProjectID) error {
+	// Unlink conversations from project
+	if _, err := r.db.ExecContext(ctx, `UPDATE conversations SET project_id = NULL WHERE project_id = ?`, id); err != nil {
+		return err
+	}
+	// Unlink artifacts from project
+	if _, err := r.db.ExecContext(ctx, `UPDATE artifacts SET project_id = NULL WHERE project_id = ?`, id); err != nil {
+		return err
+	}
+	result, err := r.db.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return domain.ErrProjectNotFound
+	}
+	return nil
+}
+
+func (r *Repository) ListProjectConversations(ctx context.Context, projectID domain.ProjectID) ([]domain.Conversation, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, title, project_id, created_at, updated_at FROM conversations WHERE project_id = ? ORDER BY updated_at DESC`, projectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var convs []domain.Conversation
+	for rows.Next() {
+		var c domain.Conversation
+		var idStr string
+		var projID *string
+		if err := rows.Scan(&idStr, &c.Title, &projID, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, err
+		}
+		c.ID = domain.ConversationID(idStr)
+		if projID != nil {
+			pid := domain.ProjectID(*projID)
+			c.ProjectID = &pid
+		}
+		convs = append(convs, c)
+	}
+	return convs, nil
+}
+
+// --- Artifact Management ---
+
+func (r *Repository) SaveArtifact(ctx context.Context, art domain.Artifact) error {
+	var projectID, jobID, convID *string
+	if art.ProjectID != nil {
+		s := string(*art.ProjectID)
+		projectID = &s
+	}
+	if art.JobID != nil {
+		s := string(*art.JobID)
+		jobID = &s
+	}
+	if art.ConversationID != nil {
+		s := string(*art.ConversationID)
+		convID = &s
+	}
+
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO artifacts (id, project_id, job_id, conversation_id, type, name, file_path, mime_type, size_bytes, prompt, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT (id) DO UPDATE SET
+		 	project_id = excluded.project_id,
+		 	name = excluded.name,
+		 	prompt = excluded.prompt`,
+		art.ID, projectID, jobID, convID, art.Type, art.Name, art.FilePath, art.MimeType, art.SizeBytes, art.Prompt, art.CreatedAt,
+	)
+	return err
+}
+
+func (r *Repository) GetArtifact(ctx context.Context, id domain.ArtifactID) (domain.Artifact, error) {
+	var a domain.Artifact
+	var idStr string
+	var projectID, jobID, convID *string
+
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, project_id, job_id, conversation_id, type, name, file_path, mime_type, size_bytes, prompt, created_at
+		 FROM artifacts WHERE id = ?`, id,
+	).Scan(&idStr, &projectID, &jobID, &convID, &a.Type, &a.Name, &a.FilePath, &a.MimeType, &a.SizeBytes, &a.Prompt, &a.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return domain.Artifact{}, domain.ErrArtifactNotFound
+		}
+		return domain.Artifact{}, err
+	}
+	a.ID = domain.ArtifactID(idStr)
+	if projectID != nil {
+		pid := domain.ProjectID(*projectID)
+		a.ProjectID = &pid
+	}
+	if jobID != nil {
+		jid := domain.JobID(*jobID)
+		a.JobID = &jid
+	}
+	if convID != nil {
+		cid := domain.ConversationID(*convID)
+		a.ConversationID = &cid
+	}
+	return a, nil
+}
+
+func (r *Repository) scanArtifacts(rows *sql.Rows) ([]domain.Artifact, error) {
+	var arts []domain.Artifact
+	for rows.Next() {
+		var a domain.Artifact
+		var idStr string
+		var projectID, jobID, convID *string
+
+		if err := rows.Scan(&idStr, &projectID, &jobID, &convID, &a.Type, &a.Name, &a.FilePath, &a.MimeType, &a.SizeBytes, &a.Prompt, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		a.ID = domain.ArtifactID(idStr)
+		if projectID != nil {
+			pid := domain.ProjectID(*projectID)
+			a.ProjectID = &pid
+		}
+		if jobID != nil {
+			jid := domain.JobID(*jobID)
+			a.JobID = &jid
+		}
+		if convID != nil {
+			cid := domain.ConversationID(*convID)
+			a.ConversationID = &cid
+		}
+		arts = append(arts, a)
+	}
+	return arts, nil
+}
+
+func (r *Repository) ListArtifacts(ctx context.Context) ([]domain.Artifact, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, project_id, job_id, conversation_id, type, name, file_path, mime_type, size_bytes, prompt, created_at
+		 FROM artifacts ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArtifacts(rows)
+}
+
+func (r *Repository) ListProjectArtifacts(ctx context.Context, projectID domain.ProjectID) ([]domain.Artifact, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, project_id, job_id, conversation_id, type, name, file_path, mime_type, size_bytes, prompt, created_at
+		 FROM artifacts WHERE project_id = ? ORDER BY created_at DESC`, projectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return r.scanArtifacts(rows)
+}
+
+func (r *Repository) DeleteArtifact(ctx context.Context, id domain.ArtifactID) error {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM artifacts WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return domain.ErrArtifactNotFound
+	}
+	return nil
+}
+
+// --- Persona Management ---
+
+func (r *Repository) CreatePersona(ctx context.Context, p domain.Persona) error {
+	allowedJSON, _ := json.Marshal(p.AllowedTools)
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO personas (id, name, description, system_prompt, icon, color, allowed_tools, is_builtin, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT (id) DO NOTHING`,
+		p.ID, p.Name, p.Description, p.SystemPrompt, p.Icon, p.Color, string(allowedJSON), p.IsBuiltin, p.CreatedAt, p.UpdatedAt,
+	)
+	return err
+}
+
+func (r *Repository) GetPersona(ctx context.Context, id domain.PersonaID) (domain.Persona, error) {
+	var p domain.Persona
+	var idStr, allowedJSON string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, name, description, system_prompt, icon, color, CAST(allowed_tools AS TEXT), is_builtin, created_at, updated_at
+		 FROM personas WHERE id = ?`, id,
+	).Scan(&idStr, &p.Name, &p.Description, &p.SystemPrompt, &p.Icon, &p.Color, &allowedJSON, &p.IsBuiltin, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return domain.Persona{}, domain.ErrPersonaNotFound
+		}
+		return domain.Persona{}, err
+	}
+	p.ID = domain.PersonaID(idStr)
+	_ = json.Unmarshal([]byte(allowedJSON), &p.AllowedTools)
+	return p, nil
+}
+
+func (r *Repository) ListPersonas(ctx context.Context) ([]domain.Persona, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, name, description, system_prompt, icon, color, CAST(allowed_tools AS TEXT), is_builtin, created_at, updated_at
+		 FROM personas ORDER BY is_builtin DESC, name ASC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var personas []domain.Persona
+	for rows.Next() {
+		var p domain.Persona
+		var idStr, allowedJSON string
+		if err := rows.Scan(&idStr, &p.Name, &p.Description, &p.SystemPrompt, &p.Icon, &p.Color, &allowedJSON, &p.IsBuiltin, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		p.ID = domain.PersonaID(idStr)
+		_ = json.Unmarshal([]byte(allowedJSON), &p.AllowedTools)
+		personas = append(personas, p)
+	}
+	return personas, nil
+}
+
+func (r *Repository) UpdatePersona(ctx context.Context, p domain.Persona) error {
+	allowedJSON, _ := json.Marshal(p.AllowedTools)
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE personas SET name = ?, description = ?, system_prompt = ?, icon = ?, color = ?, allowed_tools = ?, updated_at = ? WHERE id = ?`,
+		p.Name, p.Description, p.SystemPrompt, p.Icon, p.Color, string(allowedJSON), p.UpdatedAt, p.ID,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return domain.ErrPersonaNotFound
+	}
+	return nil
+}
+
+func (r *Repository) DeletePersona(ctx context.Context, id domain.PersonaID) error {
+	// Unlink conversations from persona
+	if _, err := r.db.ExecContext(ctx, `UPDATE conversations SET persona_id = NULL WHERE persona_id = ?`, id); err != nil {
+		return err
+	}
+	result, err := r.db.ExecContext(ctx, `DELETE FROM personas WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return domain.ErrPersonaNotFound
+	}
+	return nil
 }

@@ -27,6 +27,8 @@ const (
 // Conversation represents a multi-turn chat session
 type Conversation struct {
 	ID        ConversationID `json:"id"`
+	ProjectID *ProjectID     `json:"project_id,omitempty"`
+	PersonaID *PersonaID     `json:"persona_id,omitempty"`
 	Title     string         `json:"title"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`

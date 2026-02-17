@@ -21,7 +21,6 @@ export function Sidebar({ currentJobId, onSelectJob, onOpenSettings }: SidebarPr
         activeConversationId,
         isLoadingConversations,
         fetchConversations,
-        createConversation,
         selectConversation,
         deleteConversation,
         clearActive,

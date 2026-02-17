@@ -134,7 +134,7 @@ Pense num **desktop criativo** onde você abre "apps" (agentes especializados), 
 
 ---
 
-### M7 — Desktop Shell & Workspace (TODO) 🔜
+### M7 — Desktop Shell & Workspace ✅ DONE
 
 **IMPACTO: CRÍTICO** — Define a identidade do produto como SO, não chatbot.
 
@@ -186,27 +186,34 @@ Transformar a UI de "tela de chat com sidebar" para um **desktop criativo** onde
 
 ---
 
-### M8 — Sistema de Personas (TODO)
+### M8 — Sistema de Personas ✅ DONE
 
 **IMPACTO: ALTO** — Diferenciador do produto. Transforma como o agente se comporta.
 
-Agentes com personalidade definida que adaptam estilo, profundidade e formato de output. Integrado ao novo Desktop Shell (M7).
+Agentes com personalidade definida que adaptam estilo, profundidade e formato de output. Integrado ao Desktop Shell (M7).
 
-**Escopo**:
+**Implementado**:
 
-- **Domínio**: struct `Persona` com `ID`, `Name`, `SystemPrompt`, `Style`, `AllowedTools[]`, `Guidelines[]`, `Icon`, `Color`
-  - Personas built-in: `assistant` (genérico), `researcher` (busca profunda, citações), `teacher` (explicativo, analogias), `creator` (foco em geração de conteúdo)
-- **Backend**: CRUD `/v1/personas`, DuckDB table, tool filtering por persona
-  - `ReActAgentService` recebe Persona → `buildReActPrompt()` dinâmico
-- **Frontend**: Seletor de persona no chat panel (chips), seção "Agents" no dock lateral
-  - Visual distinto por persona (cor/ícone no dock)
+- **Domínio**: `Persona` struct (ID, Name, Description, SystemPrompt, Icon, Color, AllowedTools, IsBuiltin, CreatedAt, UpdatedAt)
+  - 4 personas built-in: `assistant` (blue/bot), `researcher` (emerald/search), `creator` (violet/palette), `coder` (amber/code)
+  - `BuiltinPersonas()` retorna as 4 personas, seed idempotente no boot
+  - `ToolRegistry.FilterByNames()` filtra tools por persona
+- **Backend**: CRUD completo `/v1/personas` (GET/POST list, GET/PATCH/DELETE individual)
+  - DuckDB: tabela `personas`, `conversations.persona_id` FK
+  - `ReActAgentService.Chat()` recebe `personaID`, resolve persona, injeta SystemPrompt dinâmico em `buildReActPrompt()`
+  - Tool filtering: persona com `AllowedTools` restringe o tool registry efetivo
+  - Proteção: built-in personas não podem ser deletadas
+- **Frontend**: PersonaChip selector no ChatPanel, `persona_id` enviado no POST `/v1/agent/chat`
+  - AgentsView: grid de PersonaCards com create/edit/delete (protege builtins)
+  - Seletor visual com ícones (bot/search/palette/code) e cores (blue/emerald/violet/amber/cyan/rose)
+  - Zustand store `personas.ts` com CRUD completo
 - **Padrão absorvido**: Cogito Guidelines, LocalAGI personas
 
-**Exit Criteria**:
+**Exit Criteria**: ✅ ALL MET
 
-- Três personas alterando comportamento do agente
-- Persona vinculada à conversa, visível no chat panel
-- Build/test passa
+- ✅ Quatro personas alterando comportamento do agente (system prompt dinâmico + tool filtering)
+- ✅ Persona vinculada à conversa, visível no chat panel
+- ✅ Build/test passa (`go build`, `go test`, `tsc --noEmit`, `npm run build`)
 
 ---
 
@@ -639,9 +646,9 @@ Times de agentes com coordenação sofisticada (handoff básico já implementado
   ┌───────────────────────────────────────────────┐
   │ FASE 2: Conversas & Desktop Shell             │
   │ M6  Conversations & Memory  ✅ DONE           │
-  │ M7  Desktop Shell & Workspace  ← PRÓXIMO     │
-  │ M8  Sistema de Personas                       │
-  │ M9  Tools Expandidos                          │
+  │ M7  Desktop Shell & Workspace  ✅ DONE        │
+  │ M8  Sistema de Personas  ✅ DONE               │
+  │ M9  Tools Expandidos  ← PRÓXIMO               │
   └──────────────────┬────────────────────────────┘
                      ▼
   ┌───────────────────────────────────────────────┐
@@ -685,7 +692,7 @@ Times de agentes com coordenação sofisticada (handoff básico já implementado
 |-----------|-----------|----------------------|
 | 🔴 #1 | **M6 Conversations** ✅ | Tudo depende de conversas persistentes |
 | 🔴 #2 | **M7 Desktop Shell** | O produto é um SO, não um chatbot. Define a identidade visual AGORA |
-| 🟠 #3 | **M8 Personas** | System prompt dinâmico dentro da nova shell. Baixo esforço, alto impacto |
+| 🟠 #3 | **M8 Personas** ✅ | System prompt dinâmico dentro da nova shell. Baixo esforço, alto impacto |
 | 🟡 #4 | **M9 Tools** | Incremental. Cada tool é independente. Aparece no dock do Desktop Shell |
 | 🟠 #5 | **M10 Agent Definition + Tool Builder** | Modelo central + criar tools via chat |
 | 🔴 #6 | **M11 Agent Studio** | Visual builder com React Flow. DIFERENCIADOR do produto |

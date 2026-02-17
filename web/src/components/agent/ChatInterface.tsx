@@ -3,6 +3,7 @@ import { Send, Bot, User, Cpu, Terminal } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { api as client } from "@/lib/api"
 import { useConversationStore, type Message } from "@/store/conversations"
+import { usePersonaStore } from "@/store/personas"
 
 interface ChatInterfaceProps {
     onOpenJob?: (jobId: string) => void
@@ -15,6 +16,8 @@ export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
         addLocalMessage,
         fetchConversations,
     } = useConversationStore()
+
+    const { activePersonaId } = usePersonaStore()
 
     const [input, setInput] = useState("")
     const [isLoading, setIsLoading] = useState(false)
@@ -52,6 +55,7 @@ export function ChatInterface({ onOpenJob }: ChatInterfaceProps) {
                     message: userContent,
                     model: "llama3.2",
                     ...(activeConversationId ? { conversation_id: activeConversationId } : {}),
+                    ...(activePersonaId ? { persona_id: activePersonaId } : {}),
                 },
             })
 

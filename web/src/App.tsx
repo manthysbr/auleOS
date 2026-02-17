@@ -1,12 +1,12 @@
 import { Route, Switch } from 'wouter'
 import Login from '@/pages/Login'
-import Workspace from '@/pages/Workspace'
+import DesktopShell from '@/pages/DesktopShell'
 
 function App() {
   return (
     <Switch>
       <Route path="/" component={Login} />
-      <Route path="/workspace" component={Workspace} />
+      <Route path="/workspace" component={DesktopShell} />
       <Route>404: No such agent</Route>
     </Switch>
   )

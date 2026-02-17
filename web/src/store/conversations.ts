@@ -4,6 +4,7 @@ import { api } from "@/lib/api"
 export interface Conversation {
     id: string
     title: string
+    persona_id?: string
     created_at: string
     updated_at: string
 }

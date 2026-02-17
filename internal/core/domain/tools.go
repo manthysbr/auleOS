@@ -51,7 +51,7 @@ func (r *ToolRegistry) Execute(ctx context.Context, name string, params map[stri
 	if !ok {
 		return nil, fmt.Errorf("tool not found: %s", name)
 	}
-	
+
 	return tool.Execute(ctx, params)
 }
 
@@ -78,4 +78,20 @@ func (r *ToolRegistry) FormatToolsForPrompt() string {
 		result += fmt.Sprintf("- %s: %s\n  Parameters: %s\n", tool.Name, tool.Description, string(paramsJSON))
 	}
 	return result
+}
+
+// FilterByNames returns a new ToolRegistry containing only the tools whose names match the given list.
+// The new registry shares Tool pointers with the original (same Execute funcs).
+func (r *ToolRegistry) FilterByNames(names []string) *ToolRegistry {
+	allowed := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		allowed[n] = struct{}{}
+	}
+	filtered := NewToolRegistry()
+	for name, tool := range r.tools {
+		if _, ok := allowed[name]; ok {
+			filtered.tools[name] = tool
+		}
+	}
+	return filtered
 }

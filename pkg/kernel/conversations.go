@@ -118,12 +118,21 @@ func domainConvToAPI(c domain.Conversation) Conversation {
 	title := c.Title
 	createdAt := c.CreatedAt
 	updatedAt := c.UpdatedAt
-	return Conversation{
+	conv := Conversation{
 		Id:        &id,
 		Title:     &title,
 		CreatedAt: &createdAt,
 		UpdatedAt: &updatedAt,
 	}
+	if c.ProjectID != nil {
+		pid := string(*c.ProjectID)
+		conv.ProjectId = &pid
+	}
+	if c.PersonaID != nil {
+		pid := string(*c.PersonaID)
+		conv.PersonaId = &pid
+	}
+	return conv
 }
 
 func domainMsgToAPI(m domain.Message) Message {

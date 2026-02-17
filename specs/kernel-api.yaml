@@ -337,6 +337,349 @@ paths:
               schema:
                 $ref: '#/components/schemas/ConnectionTestResult'
 
+  /v1/projects:
+    get:
+      summary: List all projects
+      operationId: ListProjects
+      responses:
+        '200':
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
+    post:
+      summary: Create a new project
+      operationId: CreateProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+                  example: "Campaign Q4"
+                description:
+                  type: string
+                  example: "Marketing campaign assets"
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+
+  /v1/projects/{id}:
+    get:
+      summary: Get project details
+      operationId: GetProject
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      responses:
+        '200':
+          description: Project details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      summary: Update project (name, description)
+      operationId: UpdateProject
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '200':
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Delete a project
+      operationId: DeleteProject
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Not found
+
+  /v1/projects/{id}/conversations:
+    get:
+      summary: List conversations in a project
+      operationId: ListProjectConversations
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      responses:
+        '200':
+          description: List of conversations in the project
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Conversation'
+
+  /v1/projects/{id}/artifacts:
+    get:
+      summary: List artifacts in a project
+      operationId: ListProjectArtifacts
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      responses:
+        '200':
+          description: List of artifacts in the project
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Artifact'
+
+  /v1/artifacts:
+    get:
+      summary: List all artifacts
+      operationId: ListArtifacts
+      parameters:
+      - in: query
+        name: type
+        schema:
+          type: string
+          enum: [ image, text, document, audio, video, other ]
+        description: Filter by artifact type
+      responses:
+        '200':
+          description: List of artifacts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Artifact'
+
+  /v1/artifacts/{id}:
+    get:
+      summary: Get artifact details
+      operationId: GetArtifact
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      responses:
+        '200':
+          description: Artifact details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+        '404':
+          description: Artifact not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Delete an artifact
+      operationId: DeleteArtifact
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Not found
+
+  /v1/personas:
+    get:
+      summary: List all personas
+      operationId: ListPersonas
+      responses:
+        '200':
+          description: List of personas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Persona'
+    post:
+      summary: Create a custom persona
+      operationId: CreatePersona
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              - system_prompt
+              properties:
+                name:
+                  type: string
+                  example: "Analyst"
+                description:
+                  type: string
+                  example: "Data analysis specialist"
+                system_prompt:
+                  type: string
+                  example: "You are a data analyst..."
+                icon:
+                  type: string
+                  example: "bar-chart"
+                color:
+                  type: string
+                  example: "cyan"
+                allowed_tools:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: Persona created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Persona'
+
+  /v1/personas/{id}:
+    get:
+      summary: Get persona details
+      operationId: GetPersona
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      responses:
+        '200':
+          description: Persona details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Persona'
+        '404':
+          description: Persona not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      summary: Update persona
+      operationId: UpdatePersona
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                system_prompt:
+                  type: string
+                icon:
+                  type: string
+                color:
+                  type: string
+                allowed_tools:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Updated persona
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Persona'
+        '404':
+          description: Persona not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Delete a persona
+      operationId: DeletePersona
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Not found
+
 components:
   schemas:
     ChatRequest:
@@ -353,6 +696,9 @@ components:
         conversation_id:
           type: string
           description: "Optional. If omitted, a new conversation is created automatically."
+        persona_id:
+          type: string
+          description: "Optional persona ID to use for this chat. Sets the agent personality and tool filter."
 
     ChatResponse:
       type: object
@@ -459,6 +805,12 @@ components:
           type: string
         title:
           type: string
+        project_id:
+          type: string
+          description: "Optional project this conversation belongs to"
+        persona_id:
+          type: string
+          description: "Optional persona used in this conversation"
         created_at:
           type: string
           format: date-time
@@ -542,3 +894,79 @@ components:
           enum: [ ok, error ]
         message:
           type: string
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Artifact:
+      type: object
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        job_id:
+          type: string
+        conversation_id:
+          type: string
+        type:
+          type: string
+          enum: [ image, text, document, audio, video, other ]
+        name:
+          type: string
+        file_path:
+          type: string
+        mime_type:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        prompt:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Persona:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        system_prompt:
+          type: string
+        icon:
+          type: string
+          description: "Lucide icon name"
+        color:
+          type: string
+          description: "Tailwind color token (e.g. blue, emerald, violet)"
+        allowed_tools:
+          type: array
+          items:
+            type: string
+          description: "Tool names this persona can use. Empty means all tools."
+        is_builtin:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time

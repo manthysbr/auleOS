@@ -18,7 +18,13 @@ type ReActAgentService struct {
 	llm      domain.LLMProvider
 	tools    *domain.ToolRegistry
 	convs    *ConversationStore
+	repo     personaReader
 	maxIters int
+}
+
+// personaReader is the minimal interface needed to fetch personas
+type personaReader interface {
+	GetPersona(ctx context.Context, id domain.PersonaID) (domain.Persona, error)
 }
 
 // NewReActAgentService creates a new ReAct-enabled agent
@@ -27,20 +33,35 @@ func NewReActAgentService(
 	llm domain.LLMProvider,
 	tools *domain.ToolRegistry,
 	convs *ConversationStore,
+	repo personaReader,
 ) *ReActAgentService {
 	return &ReActAgentService{
 		logger:   logger,
 		llm:      llm,
 		tools:    tools,
 		convs:    convs,
+		repo:     repo,
 		maxIters: 5,
 	}
 }
 
 // Chat processes a user message using ReAct reasoning, within a conversation context.
 // If convID is empty, it creates a new conversation automatically.
-func (s *ReActAgentService) Chat(ctx context.Context, convID domain.ConversationID, message string) (*domain.AgentResponse, domain.ConversationID, error) {
+// If personaID is provided, the agent uses the persona's system prompt and tool filter.
+func (s *ReActAgentService) Chat(ctx context.Context, convID domain.ConversationID, message string, personaID *domain.PersonaID) (*domain.AgentResponse, domain.ConversationID, error) {
 	s.logger.Info("starting ReAct loop", "message", message, "conversation_id", string(convID))
+
+	// Resolve persona
+	var persona *domain.Persona
+	if personaID != nil {
+		p, err := s.repo.GetPersona(ctx, *personaID)
+		if err == nil {
+			persona = &p
+			s.logger.Info("using persona", "persona_id", string(p.ID), "persona_name", p.Name)
+		} else {
+			s.logger.Warn("persona not found, using default", "persona_id", string(*personaID), "error", err)
+		}
+	}
 
 	// Auto-create conversation if needed
 	if convID == "" {
@@ -49,7 +70,7 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 		if len(title) > 50 {
 			title = title[:50] + "..."
 		}
-		conv, err := s.convs.CreateConversation(ctx, title)
+		conv, err := s.convs.CreateConversationWithPersona(ctx, title, personaID)
 		if err != nil {
 			return nil, "", fmt.Errorf("create conversation: %w", err)
 		}
@@ -77,9 +98,15 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 	}
 
 	conversationHistory := []string{
-		s.buildReActPrompt(history, message),
+		s.buildReActPrompt(history, message, persona),
 	}
 	steps := []domain.ReActStep{}
+
+	// Build effective tool registry (filtered by persona if applicable)
+	effectiveTools := s.tools
+	if persona != nil && len(persona.AllowedTools) > 0 {
+		effectiveTools = s.tools.FilterByNames(persona.AllowedTools)
+	}
 
 	for i := 0; i < s.maxIters; i++ {
 		s.logger.Info("ReAct iteration", "iteration", i+1)
@@ -126,7 +153,7 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 
 		// 4. Execute tool
 		s.logger.Info("executing tool", "tool", step.Action, "params", step.ActionInput)
-		result, err := s.tools.Execute(ctx, step.Action, step.ActionInput)
+		result, err := effectiveTools.Execute(ctx, step.Action, step.ActionInput)
 		if err != nil {
 			step.Observation = fmt.Sprintf("Error: %v", err)
 		} else {
@@ -146,8 +173,20 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 }
 
 // buildReActPrompt creates the initial prompt with tool descriptions and conversation history
-func (s *ReActAgentService) buildReActPrompt(history string, userMessage string) string {
-	toolsDesc := s.tools.FormatToolsForPrompt()
+func (s *ReActAgentService) buildReActPrompt(history string, userMessage string, persona *domain.Persona) string {
+	// Choose effective tool set for prompt
+	var toolsDesc string
+	if persona != nil && len(persona.AllowedTools) > 0 {
+		toolsDesc = s.tools.FilterByNames(persona.AllowedTools).FormatToolsForPrompt()
+	} else {
+		toolsDesc = s.tools.FormatToolsForPrompt()
+	}
+
+	// Build system identity from persona or default
+	systemIdentity := "You are an AI assistant with access to tools."
+	if persona != nil && persona.SystemPrompt != "" {
+		systemIdentity = persona.SystemPrompt
+	}
 
 	var historyBlock string
 	if history != "" {
@@ -158,7 +197,9 @@ Previous conversation:
 `, history)
 	}
 
-	return fmt.Sprintf(`You are an AI assistant with access to tools. Use the ReAct (Reasoning + Acting) pattern to solve tasks.
+	return fmt.Sprintf(`%s
+
+Use the ReAct (Reasoning + Acting) pattern to solve tasks.
 
 IMPORTANT FORMAT:
 Thought: [your reasoning about what to do next]
@@ -187,7 +228,7 @@ Thought: I have successfully generated the image
 Final Answer: Here's your sunset image: [observation shows URL]
 %s
 Now respond to this request:
-User: %s`, toolsDesc, historyBlock, userMessage)
+User: %s`, systemIdentity, toolsDesc, historyBlock, userMessage)
 }
 
 // parseReActOutput extracts Thought/Action/ActionInput or FinalAnswer from LLM response

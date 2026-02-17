@@ -128,10 +128,18 @@ func run(logger *slog.Logger) error {
 	convStore := services.NewConversationStore(repo, 64)
 
 	// ReAct Agent Service - agentic reasoning with tools
-	reactAgent := services.NewReActAgentService(logger, llmProvider, toolRegistry, convStore)
+	reactAgent := services.NewReActAgentService(logger, llmProvider, toolRegistry, convStore, repo)
 
 	// Legacy Agent Service (for compatibility)
 	agentService := services.NewAgentService(logger, llmProvider, imageProvider, lifecycle)
+
+	// Seed built-in personas (idempotent — ON CONFLICT DO NOTHING)
+	for _, p := range domain.BuiltinPersonas() {
+		if err := repo.CreatePersona(ctx, p); err != nil {
+			logger.Warn("failed to seed persona", "persona", p.Name, "error", err)
+		}
+	}
+	logger.Info("built-in personas seeded")
 
 	// Initialize Kernel API Server
 	apiServer := kernel.NewServer(logger, lifecycle, reactAgent, agentService, eventBus, settingsStore, convStore, workerMgr, repo)

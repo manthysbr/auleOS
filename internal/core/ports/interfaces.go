@@ -59,6 +59,28 @@ type Repository interface {
 	AddMessage(ctx context.Context, msg domain.Message) error
 	ListMessages(ctx context.Context, convID domain.ConversationID, limit int) ([]domain.Message, error)
 
+	// Projects
+	CreateProject(ctx context.Context, proj domain.Project) error
+	GetProject(ctx context.Context, id domain.ProjectID) (domain.Project, error)
+	ListProjects(ctx context.Context) ([]domain.Project, error)
+	UpdateProject(ctx context.Context, proj domain.Project) error
+	DeleteProject(ctx context.Context, id domain.ProjectID) error
+	ListProjectConversations(ctx context.Context, projectID domain.ProjectID) ([]domain.Conversation, error)
+
+	// Artifacts
+	SaveArtifact(ctx context.Context, art domain.Artifact) error
+	GetArtifact(ctx context.Context, id domain.ArtifactID) (domain.Artifact, error)
+	ListArtifacts(ctx context.Context) ([]domain.Artifact, error)
+	ListProjectArtifacts(ctx context.Context, projectID domain.ProjectID) ([]domain.Artifact, error)
+	DeleteArtifact(ctx context.Context, id domain.ArtifactID) error
+
+	// Personas
+	CreatePersona(ctx context.Context, p domain.Persona) error
+	GetPersona(ctx context.Context, id domain.PersonaID) (domain.Persona, error)
+	ListPersonas(ctx context.Context) ([]domain.Persona, error)
+	UpdatePersona(ctx context.Context, p domain.Persona) error
+	DeletePersona(ctx context.Context, id domain.PersonaID) error
+
 	// Settings
 	GetSetting(ctx context.Context, key string) (string, error)
 	SaveSetting(ctx context.Context, key string, value string) error
