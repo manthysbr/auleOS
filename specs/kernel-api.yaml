@@ -745,6 +745,30 @@ paths:
         '404':
           description: Not found
 
+  /v1/plugins:
+    get:
+      summary: List loaded Synapse plugins
+      operationId: ListPlugins
+      responses:
+        '200':
+          description: List of loaded Wasm plugins
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginListResponse'
+
+  /v1/capabilities:
+    get:
+      summary: List all system capabilities (muscle + synapse)
+      operationId: ListCapabilities
+      responses:
+        '200':
+          description: Capability map with stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityListResponse'
+
 components:
   schemas:
     ChatRequest:
@@ -1088,3 +1112,64 @@ components:
           type: string
         error:
           type: string
+
+    Plugin:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "prompt-enhancer"
+        version:
+          type: string
+          example: "1.0.0"
+        description:
+          type: string
+          example: "Enhances image prompts with quality keywords"
+        tool_name:
+          type: string
+          example: "enhance_prompt"
+        runtime:
+          type: string
+          example: "synapse"
+
+    PluginListResponse:
+      type: object
+      properties:
+        plugins:
+          type: array
+          items:
+            $ref: '#/components/schemas/Plugin'
+        count:
+          type: integer
+
+    Capability:
+      type: object
+      properties:
+        capability:
+          type: string
+          example: "image.generate"
+        runtime:
+          type: string
+          enum: [ muscle, synapse ]
+        description:
+          type: string
+
+    CapabilityStats:
+      type: object
+      properties:
+        muscle:
+          type: integer
+        synapse:
+          type: integer
+        total:
+          type: integer
+
+    CapabilityListResponse:
+      type: object
+      properties:
+        capabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/Capability'
+        stats:
+          $ref: '#/components/schemas/CapabilityStats'

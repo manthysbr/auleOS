@@ -280,7 +280,7 @@ func (s *ReActAgentService) parseReActOutput(response string) domain.ReActStep {
 	}
 
 	// Extract Action
-	actionRe := regexp.MustCompile(`(?i)Action:\s*([a-z_]+)`)
+	actionRe := regexp.MustCompile(`(?i)Action:\s*([a-z][a-z0-9_]*)`)
 	if matches := actionRe.FindStringSubmatch(response); len(matches) > 1 {
 		step.Action = strings.TrimSpace(matches[1])
 	}
