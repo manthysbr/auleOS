@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/manthysbr/auleOS/internal/config"
 	"github.com/manthysbr/auleOS/internal/core/domain"
 	"github.com/manthysbr/auleOS/internal/core/services"
@@ -30,6 +31,7 @@ type Server struct {
 	synapseRT    *synapse.Runtime
 	workflowExec *services.WorkflowExecutor
 	tracer       *services.TraceCollector
+	toolRegistry *domain.ToolRegistry
 	workerMgr    interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	}
@@ -62,6 +64,8 @@ type Server struct {
 		GetScheduledTask(ctx context.Context, id domain.ScheduledTaskID) (*domain.ScheduledTask, error)
 		ListScheduledTasks(ctx context.Context) ([]domain.ScheduledTask, error)
 		DeleteScheduledTask(ctx context.Context, id domain.ScheduledTaskID) error
+		// Workers
+		ListWorkers(ctx context.Context) ([]domain.Worker, error)
 	}
 }
 
@@ -81,6 +85,7 @@ func NewServer(
 	synapseRT *synapse.Runtime,
 	workflowExec *services.WorkflowExecutor,
 	tracer *services.TraceCollector,
+	toolRegistry *domain.ToolRegistry,
 	workerMgr interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	},
@@ -113,6 +118,8 @@ func NewServer(
 		GetScheduledTask(ctx context.Context, id domain.ScheduledTaskID) (*domain.ScheduledTask, error)
 		ListScheduledTasks(ctx context.Context) ([]domain.ScheduledTask, error)
 		DeleteScheduledTask(ctx context.Context, id domain.ScheduledTaskID) error
+		// Workers
+		ListWorkers(ctx context.Context) ([]domain.Worker, error)
 	}) *Server {
 	return &Server{
 		logger:       logger,
@@ -127,6 +134,7 @@ func NewServer(
 		synapseRT:    synapseRT,
 		workflowExec: workflowExec,
 		tracer:       tracer,
+		toolRegistry: toolRegistry,
 		workerMgr:    workerMgr,
 		repo:         repo,
 	}
@@ -166,6 +174,42 @@ func (s *Server) Handler() http.Handler {
 		}
 		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/traces/") {
 			s.handleGetTrace(w, r)
+			return
+		}
+		// Scheduled Tasks API
+		if r.Method == "GET" && r.URL.Path == "/v1/tasks" {
+			s.handleListTasks(w, r)
+			return
+		}
+		if r.Method == "POST" && r.URL.Path == "/v1/tasks" {
+			s.handleCreateTask(w, r)
+			return
+		}
+		if r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/v1/tasks/") && !strings.Contains(strings.TrimPrefix(r.URL.Path, "/v1/tasks/"), "/") {
+			s.handleDeleteTask(w, r)
+			return
+		}
+		if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/v1/tasks/") && strings.HasSuffix(r.URL.Path, "/toggle") {
+			s.handleToggleTask(w, r)
+			return
+		}
+		// Workers API
+		if r.Method == "GET" && r.URL.Path == "/v1/workers" {
+			s.handleListWorkers(w, r)
+			return
+		}
+		// Models API
+		if r.Method == "GET" && r.URL.Path == "/v1/models" {
+			s.handleListModels(w, r)
+			return
+		}
+		// Tools API — list and execute
+		if r.Method == "GET" && r.URL.Path == "/v1/tools" {
+			s.handleListTools(w, r)
+			return
+		}
+		if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/v1/tools/") && strings.HasSuffix(r.URL.Path, "/run") {
+			s.handleRunTool(w, r)
 			return
 		}
 		mux.ServeHTTP(w, r)
@@ -728,4 +772,229 @@ func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(trace)
+}
+
+// --- Scheduled Tasks API ---
+
+// handleListTasks returns all scheduled tasks.
+// GET /v1/tasks
+func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
+	tasks, err := s.repo.ListScheduledTasks(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if tasks == nil {
+		tasks = []domain.ScheduledTask{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"tasks": tasks,
+		"count": len(tasks),
+	})
+}
+
+// handleCreateTask creates a new scheduled task.
+// POST /v1/tasks
+func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
+	var req domain.ScheduledTask
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.ID = domain.ScheduledTaskID(uuid.New().String())
+	req.CreatedAt = time.Now()
+	req.RunCount = 0
+	if req.Status == "" {
+		req.Status = domain.TaskStatusActive
+	}
+	if req.Type == "" {
+		req.Type = domain.TaskTypeOneShot
+	}
+	if req.NextRun.IsZero() {
+		req.NextRun = time.Now()
+	}
+
+	if err := s.repo.SaveScheduledTask(r.Context(), &req); err != nil {
+		s.logger.Error("failed to create scheduled task", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(req)
+}
+
+// handleDeleteTask deletes a scheduled task.
+// DELETE /v1/tasks/{id}
+func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
+	if id == "" {
+		http.Error(w, "missing task id", http.StatusBadRequest)
+		return
+	}
+	if err := s.repo.DeleteScheduledTask(r.Context(), domain.ScheduledTaskID(id)); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleToggleTask toggles a task between active and paused.
+// POST /v1/tasks/{id}/toggle
+func (s *Server) handleToggleTask(w http.ResponseWriter, r *http.Request) {
+	// Path: /v1/tasks/{id}/toggle
+	withoutPrefix := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
+	id := strings.TrimSuffix(withoutPrefix, "/toggle")
+	if id == "" {
+		http.Error(w, "missing task id", http.StatusBadRequest)
+		return
+	}
+
+	task, err := s.repo.GetScheduledTask(r.Context(), domain.ScheduledTaskID(id))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if task.Status == domain.TaskStatusActive {
+		task.Status = domain.TaskStatusPaused
+	} else {
+		task.Status = domain.TaskStatusActive
+	}
+
+	if err := s.repo.SaveScheduledTask(r.Context(), task); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(task)
+}
+
+// --- Workers API ---
+
+// handleListWorkers returns all workers from the DB.
+// GET /v1/workers
+func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
+	workers, err := s.repo.ListWorkers(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if workers == nil {
+		workers = []domain.Worker{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"workers": workers,
+		"count":   len(workers),
+	})
+}
+
+// --- Models API ---
+
+// handleListModels returns the discovered model catalog.
+// GET /v1/models
+func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
+	models := s.modelRouter.GetCatalog()
+	if models == nil {
+		models = []domain.ModelSpec{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"models": models,
+		"count":  len(models),
+	})
+}
+
+// --- Tools API ---
+
+// toolDTO is the JSON representation of a tool (Execute func is excluded).
+type toolDTO struct {
+	Name          string                `json:"name"`
+	Description   string                `json:"description"`
+	Parameters    domain.ToolParameters `json:"parameters"`
+	ExecutionType string                `json:"execution_type"`
+}
+
+// handleListTools returns all registered tools with their schemas.
+// GET /v1/tools
+func (s *Server) handleListTools(w http.ResponseWriter, r *http.Request) {
+	if s.toolRegistry == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"tools": []struct{}{}, "count": 0})
+		return
+	}
+	tools := s.toolRegistry.ListTools()
+	dtos := make([]toolDTO, 0, len(tools))
+	for _, t := range tools {
+		dtos = append(dtos, toolDTO{
+			Name:          t.Name,
+			Description:   t.Description,
+			Parameters:    t.Parameters,
+			ExecutionType: string(t.ExecutionType),
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"tools": dtos,
+		"count": len(dtos),
+	})
+}
+
+// handleRunTool executes a tool by name with the provided JSON params.
+// POST /v1/tools/{name}/run
+// Body: {"params": {...}}
+func (s *Server) handleRunTool(w http.ResponseWriter, r *http.Request) {
+	if s.toolRegistry == nil {
+		http.Error(w, `{"error":"tool registry not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	// Parse tool name: /v1/tools/{name}/run
+	withoutPrefix := strings.TrimPrefix(r.URL.Path, "/v1/tools/")
+	toolName := strings.TrimSuffix(withoutPrefix, "/run")
+	if toolName == "" {
+		http.Error(w, `{"error":"missing tool name"}`, http.StatusBadRequest)
+		return
+	}
+
+	var body struct {
+		Params map[string]interface{} `json:"params"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err.Error() != "EOF" {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if body.Params == nil {
+		body.Params = map[string]interface{}{}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	startTime := time.Now()
+	result, err := s.toolRegistry.Execute(ctx, toolName, body.Params)
+	elapsed := time.Since(startTime).Milliseconds()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":          false,
+			"tool":        toolName,
+			"error":       err.Error(),
+			"duration_ms": elapsed,
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":          true,
+		"tool":        toolName,
+		"result":      result,
+		"duration_ms": elapsed,
+	})
 }

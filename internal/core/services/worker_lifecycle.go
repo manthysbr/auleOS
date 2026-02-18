@@ -198,6 +198,21 @@ func (s *WorkerLifecycle) executeJob(ctx context.Context, job domain.Job) {
 	}
 	s.logger.Info("worker spawned", "worker_id", workerID, "job_id", job.ID)
 
+	// Persist worker record so the Workers view shows it immediately
+	worker := domain.Worker{
+		ID:        workerID,
+		Spec:      job.Spec,
+		Status:    domain.HealthStatusStarting,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Metadata: map[string]string{
+			"job_id": string(job.ID),
+		},
+	}
+	if err := s.repo.SaveWorker(ctx, worker); err != nil {
+		s.logger.Warn("failed to persist worker record", "worker_id", workerID, "error", err)
+	}
+
 	// 4. Watch Loop (Wait for completion)
 	// In a real system, we'd use the Watchdog API here to poll status or wait for SSE.
 	// For this milestone, let's poll HealthCheck until it exits.
@@ -210,10 +225,12 @@ func (s *WorkerLifecycle) executeJob(ctx context.Context, job domain.Job) {
 		select {
 		case <-ctx.Done():
 			_ = s.workerMgr.Kill(context.Background(), workerID)
+			_ = s.repo.UpdateWorkerStatus(ctx, workerID, domain.HealthStatusExited)
 			return
 		case <-timeout:
 			s.logger.Warn("job timed out", "job_id", job.ID)
 			_ = s.workerMgr.Kill(ctx, workerID)
+			_ = s.repo.UpdateWorkerStatus(ctx, workerID, domain.HealthStatusExited)
 			s.failJob(ctx, job, fmt.Errorf("timeout"))
 			return
 		case <-ticker.C:
@@ -222,6 +239,9 @@ func (s *WorkerLifecycle) executeJob(ctx context.Context, job domain.Job) {
 				s.logger.Error("health check failed", "error", err)
 				continue
 			}
+
+			// Keep DB status in sync with container reality
+			_ = s.repo.UpdateWorkerStatus(ctx, workerID, status)
 
 			if status == domain.HealthStatusExited {
 				s.logger.Info("job completed", "job_id", job.ID)

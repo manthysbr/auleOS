@@ -366,6 +366,27 @@ Thought: I need to use read_file to read this file.
 Action: read_file
 Action Input: {"path": "main.go"}
 
+Example 6 — write then read a file:
+User: Save a note and then show it back
+Thought: I will write the file first, capturing the project_id from context.
+Action: write_file
+Action Input: {"path": "note.md", "content": "My note"}
+Observation: "Written to note.md (7 bytes) @ path /home/user/.aule/workspaces/abc/note.md | project_id: abc"
+Thought: I can now read it back using the same project_id.
+Action: read_file
+Action Input: {"path": "note.md", "project_id": "abc"}
+
+Example 7 — delegate to sub-agents:
+User: Research Python and Go in parallel
+Thought: I should delegate these as two parallel tasks to researcher personas.
+Action: delegate
+Action Input: {"tasks": [{"persona": "researcher", "prompt": "Research Python language features"}, {"persona": "researcher", "prompt": "Research Go language features"}]}
+
+CRITICAL JSON RULES:
+- ALL JSON keys MUST be wrapped in double quotes: {"key": "value"} NOT {key: "value"}
+- No trailing commas: {"a": 1, "b": 2} NOT {"a": 1, "b": 2,}
+- Action Input must be a single-line JSON object
+
 Now respond to:
 User: %s`, systemIdentity, toolsDesc, memoryBlock, historyBlock, userMessage)
 }
@@ -405,6 +426,32 @@ func (s *ReActAgentService) parseReActOutput(response string) domain.ReActStep {
 	step.ActionInput = s.extractActionInput(response)
 
 	return step
+}
+
+// repairJSON attempts to fix common LLM JSON formatting mistakes:
+// - unquoted object keys  (e.g.  key: "val"  →  "key": "val")
+// - trailing commas before }/]
+// - single-quoted strings  ('val' → "val")
+func repairJSON(s string) string {
+	// 1. Quote bare keys: word characters followed by a colon not inside a string
+	//    Matches: { key: or , key: patterns
+	unquotedKey := regexp.MustCompile(`([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:`)
+	s = unquotedKey.ReplaceAllStringFunc(s, func(match string) string {
+		// Already quoted?
+		if strings.Contains(match, `"`) {
+			return match
+		}
+		// Extract prefix ({, or ,) and key name
+		idxColon := strings.LastIndex(match, ":")
+		prefix := match[:1] // '{' or ','
+		spaceKey := strings.TrimRight(match[1:idxColon], " ")
+		spaceKey = strings.TrimLeft(spaceKey, " ")
+		return prefix + `"` + spaceKey + `":`
+	})
+	// 2. Remove trailing commas before } or ]
+	trailingComma := regexp.MustCompile(`,\s*([}\]])`)
+	s = trailingComma.ReplaceAllString(s, "$1")
+	return s
 }
 
 // extractActionInput extracts the JSON object from "Action Input: {...}" using brace-depth counting
@@ -454,10 +501,17 @@ func (s *ReActAgentService) extractActionInput(response string) map[string]inter
 				var params map[string]interface{}
 				if parseErr := json.Unmarshal([]byte(jsonStr), &params); parseErr == nil {
 					return params
-				} else {
-					s.logger.Warn("failed to parse action input JSON", "error", parseErr, "json", jsonStr)
-					return map[string]interface{}{"raw": jsonStr}
 				}
+				// Attempt JSON repair before giving up
+				repaired := repairJSON(jsonStr)
+				if repaired != jsonStr {
+					if parseErr2 := json.Unmarshal([]byte(repaired), &params); parseErr2 == nil {
+						s.logger.Info("action input JSON repaired", "original", jsonStr, "repaired", repaired)
+						return params
+					}
+				}
+				s.logger.Warn("failed to parse action input JSON (after repair)", "json", jsonStr)
+				return nil // return nil so the iteration continues rather than inserting raw garbage
 			}
 		}
 	}
@@ -468,6 +522,12 @@ func (s *ReActAgentService) extractActionInput(response string) map[string]inter
 		var params map[string]interface{}
 		if err := json.Unmarshal([]byte(match), &params); err == nil {
 			return params
+		}
+		// Also try repaired
+		if repaired := repairJSON(match); repaired != match {
+			if err2 := json.Unmarshal([]byte(repaired), &params); err2 == nil {
+				return params
+			}
 		}
 	}
 

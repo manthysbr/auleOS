@@ -26,19 +26,21 @@ type WorkflowExecutor struct {
 	repo     WorkflowRepository
 	agent    *ReActAgentService
 	eventBus *EventBus
-	mu       sync.Mutex // protects concurrent step execution writes
+	tracer   *TraceCollector // optional; nil-safe
+	mu       sync.Mutex      // protects concurrent step execution writes
 
 	// resumeCh is used to signal resume after interrupt, keyed by workflow ID
 	resumeChans   map[domain.WorkflowID]chan struct{}
 	resumeChansMu sync.Mutex
 }
 
-func NewWorkflowExecutor(logger *slog.Logger, repo WorkflowRepository, agent *ReActAgentService, eventBus *EventBus) *WorkflowExecutor {
+func NewWorkflowExecutor(logger *slog.Logger, repo WorkflowRepository, agent *ReActAgentService, eventBus *EventBus, tracer *TraceCollector) *WorkflowExecutor {
 	return &WorkflowExecutor{
 		logger:      logger,
 		repo:        repo,
 		agent:       agent,
 		eventBus:    eventBus,
+		tracer:      tracer,
 		resumeChans: make(map[domain.WorkflowID]chan struct{}),
 	}
 }
@@ -58,7 +60,17 @@ func (e *WorkflowExecutor) Start(ctx context.Context, wf *domain.Workflow) error
 		"steps":       len(wf.Steps),
 	})
 
-	go e.runLoop(context.Background(), wf.ID)
+	// Start a trace for the whole workflow execution (background context so it outlives request)
+	runCtx := context.Background()
+	if e.tracer != nil {
+		var traceID domain.TraceID
+		runCtx, traceID, _ = e.tracer.StartTrace(runCtx, "workflow: "+wf.Name, map[string]string{
+			"workflow_id": string(wf.ID),
+		})
+		_ = traceID
+	}
+
+	go e.runLoop(runCtx, wf.ID)
 
 	return nil
 }
@@ -298,6 +310,16 @@ func (e *WorkflowExecutor) executeStep(ctx context.Context, wfID domain.Workflow
 		return nil
 	}
 
+	// --- Tracing: start a span for this step execution ---
+	var spanID domain.SpanID
+	if e.tracer != nil {
+		ctx, spanID = e.tracer.StartSpan(ctx, "step."+step.ID, domain.SpanKindStep, map[string]string{
+			"workflow_id": string(wfID),
+			"step_id":     step.ID,
+		})
+		e.tracer.SetSpanInput(spanID, step.Prompt)
+	}
+
 	// Mark Running
 	step.Status = domain.StepStatusRunning
 	now := time.Now()
@@ -332,6 +354,9 @@ func (e *WorkflowExecutor) executeStep(ctx context.Context, wfID domain.Workflow
 		e.repo.SaveWorkflow(ctx, wf)
 		e.mu.Unlock()
 
+		if e.tracer != nil {
+			e.tracer.EndSpan(spanID, domain.SpanStatusError, "", agentErr.Error())
+		}
 		e.emitEvent(wfID, "step.failed", map[string]any{
 			"step_id": step.ID,
 			"error":   msg,
@@ -364,6 +389,9 @@ func (e *WorkflowExecutor) executeStep(ctx context.Context, wfID domain.Workflow
 		e.repo.SaveWorkflow(ctx, wf)
 		e.mu.Unlock()
 
+		if e.tracer != nil {
+			e.tracer.EndSpan(spanID, domain.SpanStatusOK, resp.Response, "")
+		}
 		e.emitEvent(wfID, "step.interrupted", map[string]any{
 			"step_id": step.ID,
 			"phase":   "after",
@@ -377,6 +405,9 @@ func (e *WorkflowExecutor) executeStep(ctx context.Context, wfID domain.Workflow
 	e.repo.SaveWorkflow(ctx, wf)
 	e.mu.Unlock()
 
+	if e.tracer != nil {
+		e.tracer.EndSpan(spanID, domain.SpanStatusOK, resp.Response, "")
+	}
 	e.emitEvent(wfID, "step.completed", map[string]any{
 		"step_id":     step.ID,
 		"duration_ms": duration.Milliseconds(),

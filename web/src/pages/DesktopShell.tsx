@@ -11,6 +11,8 @@ import { ToolsView } from "@/components/shell/ToolsView"
 import { WorkflowsView } from "@/components/shell/WorkflowsView"
 import { JobsView } from "@/components/shell/JobsView"
 import { TracesView } from "@/components/shell/TracesView"
+import { ScheduledTasksView } from "@/components/shell/ScheduledTasksView"
+import { WorkersView } from "@/components/shell/WorkersView"
 import { SettingsPanel } from "@/components/workspace/SettingsPanel"
 import { useUIStore } from "@/store/ui"
 
@@ -34,6 +36,10 @@ function CenterStage() {
             return <JobsView />
         case "traces":
             return <TracesView />
+        case "tasks":
+            return <ScheduledTasksView />
+        case "workers":
+            return <WorkersView />
         case "settings":
             return <SettingsPanel onClose={() => useUIStore.getState().setActiveView("dashboard")} />
         default:

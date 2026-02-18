@@ -25,6 +25,7 @@ type SubAgentOrchestrator struct {
 	repo    personaReader
 	bus     *EventBus
 	synapse *synapse.Runtime // Wasm runtime for fast-path sub-agents
+	tracer  *TraceCollector  // optional; for sub-agent span instrumentation
 
 	mu       sync.RWMutex
 	active   map[domain.SubAgentID]*domain.SubAgentTask // currently running
@@ -50,6 +51,11 @@ func NewSubAgentOrchestrator(
 		active:   make(map[domain.SubAgentID]*domain.SubAgentTask),
 		maxIters: 3, // sub-agents are focused — fewer iterations
 	}
+}
+
+// SetTracer injects an optional TraceCollector for sub-agent span instrumentation.
+func (o *SubAgentOrchestrator) SetTracer(t *TraceCollector) {
+	o.tracer = t
 }
 
 // Delegate runs multiple sub-agent tasks in parallel and returns combined results.
@@ -147,6 +153,22 @@ func (o *SubAgentOrchestrator) runSubAgent(
 		"prompt", spec.Prompt[:min(80, len(spec.Prompt))],
 	)
 
+	// Start trace span for this sub-agent (nil-safe; only works if ctx carries a trace)
+	var spanID domain.SpanID
+	if o.tracer != nil {
+		attrs := map[string]string{
+			"persona": persona.Name,
+			"model":   modelID,
+		}
+		_, spanID = o.tracer.StartSpan(ctx, "subagent."+string(saID), domain.SpanKindSubAgent, attrs)
+		o.tracer.SetSpanInput(spanID, spec.Prompt)
+	}
+	endSpan := func(status domain.SpanStatus, output, errMsg string) {
+		if o.tracer != nil && spanID != "" {
+			o.tracer.EndSpan(spanID, status, output, errMsg)
+		}
+	}
+
 	// Build effective tool set
 	effectiveTools := o.tools
 	if len(persona.AllowedTools) > 0 {
@@ -168,6 +190,7 @@ func (o *SubAgentOrchestrator) runSubAgent(
 			fin := time.Now()
 			task.FinishedAt = &fin
 			o.publishEvent(task, persona)
+			endSpan(domain.SpanStatusError, "", task.Error)
 			return task
 		}
 
@@ -189,6 +212,7 @@ func (o *SubAgentOrchestrator) runSubAgent(
 				"persona", persona.Name,
 				"result_len", len(step.FinalAnswer),
 			)
+			endSpan(domain.SpanStatusOK, step.FinalAnswer, "")
 			return task
 		}
 
@@ -211,6 +235,7 @@ func (o *SubAgentOrchestrator) runSubAgent(
 			fin := time.Now()
 			task.FinishedAt = &fin
 			o.publishEvent(task, persona)
+			endSpan(domain.SpanStatusOK, response, "")
 			return task
 		}
 	}
@@ -222,6 +247,7 @@ func (o *SubAgentOrchestrator) runSubAgent(
 	fin := time.Now()
 	task.FinishedAt = &fin
 	o.publishEvent(task, persona)
+	endSpan(domain.SpanStatusError, "", task.Error)
 	return task
 }
 

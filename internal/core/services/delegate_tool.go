@@ -62,6 +62,40 @@ func NewDelegateTool(orchestrator *SubAgentOrchestrator) *domain.Tool {
 				return nil, fmt.Errorf("tasks array is empty")
 			}
 
+			// Normalise task specs in case the LLM used non-standard keys.
+			// LLMs sometimes emit {"task": "..."} instead of {"persona":"...","prompt":"..."}
+			var rawItems []map[string]interface{}
+			_ = json.Unmarshal(tasksJSON, &rawItems)
+			for i := range taskSpecs {
+				// Fallback: map "task" key → prompt
+				if taskSpecs[i].Prompt == "" && i < len(rawItems) {
+					if v, ok := rawItems[i]["task"].(string); ok && v != "" {
+						taskSpecs[i].Prompt = v
+					} else if v, ok := rawItems[i]["instruction"].(string); ok && v != "" {
+						taskSpecs[i].Prompt = v
+					} else if v, ok := rawItems[i]["content"].(string); ok && v != "" {
+						taskSpecs[i].Prompt = v
+					}
+				}
+				// Default persona when empty
+				if taskSpecs[i].Persona == "" {
+					if i < len(rawItems) {
+						if v, ok := rawItems[i]["agent"].(string); ok && v != "" {
+							taskSpecs[i].Persona = v
+						} else if v, ok := rawItems[i]["role"].(string); ok && v != "" {
+							taskSpecs[i].Persona = v
+						} else {
+							taskSpecs[i].Persona = "assistant"
+						}
+					} else {
+						taskSpecs[i].Persona = "assistant"
+					}
+				}
+				if taskSpecs[i].Prompt == "" {
+					return nil, fmt.Errorf("task %d has no prompt", i)
+				}
+			}
+
 			// Extract conversation ID from context (set by the ReAct loop)
 			convID, _ := ctx.Value(ctxKeyConversationID).(domain.ConversationID)
 			parentID, _ := ctx.Value(ctxKeySubAgentID).(domain.SubAgentID)

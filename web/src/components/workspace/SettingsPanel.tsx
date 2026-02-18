@@ -2,7 +2,7 @@ import { GlassPanel } from "@/components/ui/glass-panel"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import { useState, useEffect, useCallback } from "react"
-import { Settings, Cpu, Image, Eye, EyeOff, Plug, Save, RotateCcw, CheckCircle, XCircle, Loader2 } from "lucide-react"
+import { Settings, Cpu, Image, Eye, EyeOff, Plug, Save, RotateCcw, CheckCircle, XCircle, Loader2, RefreshCw } from "lucide-react"
 
 interface SettingsPanelProps {
     onClose?: () => void
@@ -28,6 +28,14 @@ interface TestResult {
     message: string
 }
 
+interface ModelSpec {
+    id: string
+    name: string
+    provider: string
+    capability: string
+    context_window?: number
+}
+
 const defaultConfig: AppConfig = {
     providers: {
         llm: { mode: "local", local_url: "http://localhost:11434/v1", remote_url: "", api_key: "", default_model: "gemma3:12b" },
@@ -35,7 +43,7 @@ const defaultConfig: AppConfig = {
     },
 }
 
-const LLM_MODELS = {
+const LLM_MODELS_FALLBACK = {
     local: ["gemma3:12b", "gemma3:4b", "llama3.2:3b", "llama3.1:8b", "mistral:7b", "qwen2.5:7b", "deepseek-r1:8b"],
     remote: ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo", "claude-sonnet-4-20250514", "claude-3-5-haiku-20241022"],
 }
@@ -55,6 +63,24 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     const [llmTest, setLlmTest] = useState<TestResult>({ status: null, message: "" })
     const [imageTest, setImageTest] = useState<TestResult>({ status: null, message: "" })
     const [saveSuccess, setSaveSuccess] = useState(false)
+    const [discoveredModels, setDiscoveredModels] = useState<ModelSpec[]>([])
+    const [discoveringModels, setDiscoveringModels] = useState(false)
+
+    // Fetch discovered model catalog from backend
+    const fetchModels = useCallback(async () => {
+        setDiscoveringModels(true)
+        try {
+            const res = await fetch("/v1/models")
+            if (res.ok) {
+                const data = await res.json()
+                setDiscoveredModels(data.models ?? [])
+            }
+        } catch {
+            // non-fatal — fallback list will be used
+        } finally {
+            setDiscoveringModels(false)
+        }
+    }, [])
 
     // Load settings from backend
     const loadSettings = useCallback(async () => {
@@ -90,9 +116,23 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         }
     }, [])
 
-    useEffect(() => { loadSettings() }, [loadSettings])
+    useEffect(() => {
+        loadSettings()
+        fetchModels()
+    }, [loadSettings, fetchModels])
 
     const hasChanges = JSON.stringify(config) !== JSON.stringify(original)
+
+    // Build LLM model options from discovered + fallback
+    const llmModelOptions = (() => {
+        const llmDiscovered = discoveredModels
+            .filter(m => m.capability === "llm" || m.capability === "chat" || m.provider === "ollama" || m.provider === "openai")
+            .map(m => m.id)
+        const mode = config.providers.llm.mode
+        const fallback = mode === "local" ? LLM_MODELS_FALLBACK.local : LLM_MODELS_FALLBACK.remote
+        const combined = llmDiscovered.length > 0 ? [...new Set([...llmDiscovered, ...fallback])] : fallback
+        return combined
+    })()
 
     // Save settings
     const handleSave = async () => {
@@ -309,16 +349,27 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         </>
                     )}
 
-                    {/* Model selector */}
+                    {/* Model selector — dynamic from /v1/models + fallback */}
                     <div>
-                        <label className="text-sm font-medium text-muted-foreground mb-1 block">Modelo Padrão</label>
+                        <div className="flex items-center justify-between mb-1">
+                            <label className="text-sm font-medium text-muted-foreground">Modelo Padrão</label>
+                            <button
+                                onClick={fetchModels}
+                                disabled={discoveringModels}
+                                className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                                title="Redescobrir modelos"
+                            >
+                                <RefreshCw className={`w-3 h-3 ${discoveringModels ? "animate-spin" : ""}`} />
+                                {discoveringModels ? "descobrindo..." : discoveredModels.length > 0 ? `${discoveredModels.length} descobertos` : "descobrir"}
+                            </button>
+                        </div>
                         <div className="flex gap-2">
                             <select
                                 value={config.providers.llm.default_model}
                                 onChange={e => updateLLM("default_model", e.target.value)}
                                 className="flex-1 px-3 py-2 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30"
                             >
-                                {(config.providers.llm.mode === "local" ? LLM_MODELS.local : LLM_MODELS.remote).map(m => (
+                                {llmModelOptions.map(m => (
                                     <option key={m} value={m}>{m}</option>
                                 ))}
                             </select>

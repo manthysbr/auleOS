@@ -17,12 +17,18 @@ const (
 	maxInputOutput = 2000 // truncate input/output at 2KB
 )
 
+// TraceRepository is the minimal persistence interface needed by TraceCollector.
+type TraceRepository interface {
+	SaveTrace(ctx context.Context, trace *domain.Trace) error
+}
+
 // TraceCollector gathers, stores, and exposes traces and spans.
 // Thread-safe. Operates as a ring buffer of recent traces.
 type TraceCollector struct {
 	mu       sync.RWMutex
 	logger   *slog.Logger
 	eventBus *EventBus
+	repo     TraceRepository // optional; if non-nil, completed traces are persisted
 
 	// Ring buffer of traces, keyed by TraceID
 	traces     map[domain.TraceID]*domain.Trace
@@ -31,10 +37,12 @@ type TraceCollector struct {
 }
 
 // NewTraceCollector creates a new collector with optional EventBus for real-time events.
-func NewTraceCollector(logger *slog.Logger, eventBus *EventBus) *TraceCollector {
+// repo may be nil; when provided, traces are persisted to DB on completion.
+func NewTraceCollector(logger *slog.Logger, eventBus *EventBus, repo TraceRepository) *TraceCollector {
 	return &TraceCollector{
 		logger:   logger,
 		eventBus: eventBus,
+		repo:     repo,
 		traces:   make(map[domain.TraceID]*domain.Trace, maxTraces),
 		spans:    make(map[domain.SpanID]*domain.Span, maxTraces*10),
 	}
@@ -106,10 +114,10 @@ func (tc *TraceCollector) StartTrace(ctx context.Context, name string, attrs map
 // EndTrace finalizes a trace.
 func (tc *TraceCollector) EndTrace(traceID domain.TraceID, status domain.SpanStatus, errMsg string) {
 	tc.mu.Lock()
-	defer tc.mu.Unlock()
 
 	trace, ok := tc.traces[traceID]
 	if !ok {
+		tc.mu.Unlock()
 		return
 	}
 
@@ -133,6 +141,31 @@ func (tc *TraceCollector) EndTrace(traceID domain.TraceID, status domain.SpanSta
 		"status":      status,
 		"duration_ms": trace.DurationMs,
 	})
+
+	// Build a copy for persistence (while still holding the lock for safe span iteration)
+	var persistCopy *domain.Trace
+	if tc.repo != nil {
+		cp := *trace
+		for _, span := range tc.spans {
+			if span.TraceID == traceID {
+				cp.Spans = append(cp.Spans, *span)
+			}
+		}
+		persistCopy = &cp
+	}
+
+	tc.mu.Unlock()
+
+	// Persist asynchronously to avoid blocking callers
+	if persistCopy != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := tc.repo.SaveTrace(ctx, persistCopy); err != nil {
+				tc.logger.Warn("failed to persist trace", "trace_id", traceID, "error", err)
+			}
+		}()
+	}
 }
 
 // --- Span lifecycle ---

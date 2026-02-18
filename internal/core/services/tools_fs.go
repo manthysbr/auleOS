@@ -147,7 +147,11 @@ func NewWriteFileTool(ws *WorkspaceManager) *domain.Tool {
 				return nil, fmt.Errorf("failed to write file: %w", err)
 			}
 
-			return fmt.Sprintf("Successfully wrote to %s (%d bytes)", path, len(content)), nil
+			// Return project_id in response so the agent can use it in subsequent read_file calls
+			if projectID != "" {
+				return fmt.Sprintf("Written to %s (%d bytes) @ path %s | project_id: %s", path, len(content), safePath, projectID), nil
+			}
+			return fmt.Sprintf("Written to %s (%d bytes) @ path %s", path, len(content), safePath), nil
 		},
 	}
 }

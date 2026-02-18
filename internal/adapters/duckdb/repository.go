@@ -149,6 +149,34 @@ func (r *Repository) migrate() error {
 			category TEXT NOT NULL DEFAULT 'fact',
 			created_at TIMESTAMP NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS traces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'running',
+			conversation_id TEXT NOT NULL DEFAULT '',
+			persona_id TEXT NOT NULL DEFAULT '',
+			root_span_id TEXT NOT NULL DEFAULT '',
+			start_time TIMESTAMP NOT NULL,
+			end_time TIMESTAMP,
+			duration_ms BIGINT NOT NULL DEFAULT 0,
+			span_count INTEGER NOT NULL DEFAULT 0
+		);`,
+		`CREATE TABLE IF NOT EXISTS spans (
+			id TEXT PRIMARY KEY,
+			trace_id TEXT NOT NULL,
+			parent_id TEXT NOT NULL DEFAULT '',
+			name TEXT NOT NULL DEFAULT '',
+			kind TEXT NOT NULL DEFAULT 'agent',
+			status TEXT NOT NULL DEFAULT 'running',
+			input TEXT NOT NULL DEFAULT '',
+			output TEXT NOT NULL DEFAULT '',
+			error TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			attributes JSON,
+			start_time TIMESTAMP NOT NULL,
+			end_time TIMESTAMP,
+			duration_ms BIGINT NOT NULL DEFAULT 0
+		);`,
 	}
 
 	for _, q := range queries {

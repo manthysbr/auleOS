@@ -160,7 +160,7 @@ func run(logger *slog.Logger) error {
 	modelRouter := services.NewModelRouter(logger, llmProvider)
 
 	// Trace Collector — observability engine (Genkit-style tracing)
-	traceCollector := services.NewTraceCollector(logger, eventBus)
+	traceCollector := services.NewTraceCollector(logger, eventBus, repo)
 
 	// Hot-reload: when settings change, rebuild providers and swap in lifecycle + model router
 	settingsStore.OnChange(func(cfg *domain.AppConfig) {
@@ -194,6 +194,7 @@ func run(logger *slog.Logger) error {
 
 	// Sub-Agent Orchestrator - parallel delegation engine
 	subOrchestrator := services.NewSubAgentOrchestrator(logger, modelRouter, toolRegistry, repo, eventBus, wasmRT)
+	subOrchestrator.SetTracer(traceCollector) // wire span instrumentation
 
 	// Register delegate tool (must be after orchestrator creation)
 	delegateTool := services.NewDelegateTool(subOrchestrator)
@@ -271,7 +272,7 @@ func run(logger *slog.Logger) error {
 	capRouter := services.NewCapabilityRouter(logger, wasmRT)
 
 	// Workflow Engine (M12)
-	workflowExec := services.NewWorkflowExecutor(logger, repo, reactAgent, eventBus)
+	workflowExec := services.NewWorkflowExecutor(logger, repo, reactAgent, eventBus, traceCollector)
 
 	// Register Workflow Tools
 	if err := toolRegistry.Register(services.NewCreateWorkflowTool(repo)); err != nil {
@@ -309,7 +310,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// Initialize Kernel API Server
-	apiServer := kernel.NewServer(logger, lifecycle, reactAgent, eventBus, settingsStore, convStore, modelRouter, discovery, capRouter, wasmRT, workflowExec, traceCollector, workerMgr, repo)
+	apiServer := kernel.NewServer(logger, lifecycle, reactAgent, eventBus, settingsStore, convStore, modelRouter, discovery, capRouter, wasmRT, workflowExec, traceCollector, toolRegistry, workerMgr, repo)
 
 	// CronScheduler — executes scheduled tasks (M11)
 	cronScheduler := services.NewCronScheduler(logger, repo, reactAgent, eventBus)

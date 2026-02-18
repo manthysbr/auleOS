@@ -1,4 +1,4 @@
-import { Home, FolderKanban, Bot, Wrench, Activity, Settings, Search, Workflow, ScanSearch } from "lucide-react"
+import { Home, FolderKanban, Bot, Wrench, Activity, Settings, Search, Workflow, ScanSearch, CalendarClock, Cpu } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useUIStore } from "@/store/ui"
 
@@ -9,6 +9,8 @@ const dockItems = [
     { id: "workflows" as const, icon: Workflow, label: "Flows" },
     { id: "tools" as const, icon: Wrench, label: "Tools" },
     { id: "jobs" as const, icon: Activity, label: "Jobs" },
+    { id: "tasks" as const, icon: CalendarClock, label: "Tasks" },
+    { id: "workers" as const, icon: Cpu, label: "Workers" },
     { id: "traces" as const, icon: ScanSearch, label: "Traces" },
     { id: "settings" as const, icon: Settings, label: "Settings" },
 ] as const
