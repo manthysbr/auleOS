@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Dock } from "@/components/shell/Dock"
 import { TopBar } from "@/components/shell/TopBar"
 import { BottomBar } from "@/components/shell/BottomBar"
-import { ChatPanel } from "@/components/shell/ChatPanel"
+import { FloatingChatWindow } from "@/components/shell/FloatingChatWindow"
 import { CommandPalette } from "@/components/shell/CommandPalette"
 import { Dashboard } from "@/components/shell/Dashboard"
 import { ProjectView } from "@/components/shell/ProjectView"
@@ -10,6 +10,7 @@ import { AgentsView } from "@/components/shell/AgentsView"
 import { ToolsView } from "@/components/shell/ToolsView"
 import { WorkflowsView } from "@/components/shell/WorkflowsView"
 import { JobsView } from "@/components/shell/JobsView"
+import { TracesView } from "@/components/shell/TracesView"
 import { SettingsPanel } from "@/components/workspace/SettingsPanel"
 import { useUIStore } from "@/store/ui"
 
@@ -31,6 +32,8 @@ function CenterStage() {
             return <ToolsView />
         case "jobs":
             return <JobsView />
+        case "traces":
+            return <TracesView />
         case "settings":
             return <SettingsPanel onClose={() => useUIStore.getState().setActiveView("dashboard")} />
         default:
@@ -54,13 +57,13 @@ export default function DesktopShell() {
                     <main className="flex-1 min-w-0 overflow-hidden">
                         <CenterStage />
                     </main>
-
-                    {/* Right Chat Panel */}
-                    <ChatPanel />
                 </div>
 
                 {/* Bottom Bar */}
                 <BottomBar />
+
+                {/* Floating Chat Window (overlay) */}
+                <FloatingChatWindow />
 
                 {/* Command Palette (overlay) */}
                 <CommandPalette />

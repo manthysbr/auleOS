@@ -2,9 +2,11 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/manthysbr/auleOS/internal/core/domain"
@@ -15,20 +17,29 @@ import (
 type WorkflowRepository interface {
 	GetWorkflow(ctx context.Context, id domain.WorkflowID) (*domain.Workflow, error)
 	SaveWorkflow(ctx context.Context, wf *domain.Workflow) error
+	ListWorkflows(ctx context.Context) ([]domain.Workflow, error)
 }
 
 // WorkflowExecutor manages the execution of workflows
 type WorkflowExecutor struct {
-	logger *slog.Logger
-	repo   WorkflowRepository
-	agent  *ReActAgentService // To execute steps
+	logger   *slog.Logger
+	repo     WorkflowRepository
+	agent    *ReActAgentService
+	eventBus *EventBus
+	mu       sync.Mutex // protects concurrent step execution writes
+
+	// resumeCh is used to signal resume after interrupt, keyed by workflow ID
+	resumeChans   map[domain.WorkflowID]chan struct{}
+	resumeChansMu sync.Mutex
 }
 
-func NewWorkflowExecutor(logger *slog.Logger, repo WorkflowRepository, agent *ReActAgentService) *WorkflowExecutor {
+func NewWorkflowExecutor(logger *slog.Logger, repo WorkflowRepository, agent *ReActAgentService, eventBus *EventBus) *WorkflowExecutor {
 	return &WorkflowExecutor{
-		logger: logger,
-		repo:   repo,
-		agent:  agent,
+		logger:      logger,
+		repo:        repo,
+		agent:       agent,
+		eventBus:    eventBus,
+		resumeChans: make(map[domain.WorkflowID]chan struct{}),
 	}
 }
 
@@ -41,13 +52,98 @@ func (e *WorkflowExecutor) Start(ctx context.Context, wf *domain.Workflow) error
 		return fmt.Errorf("failed to start workflow: %w", err)
 	}
 
-	// Launch execution in background (or foreground if synchronous)
-	// For M12, let's run synchronously in the request content for simplicity,
-	// or ideally launch a goroutine. Given the complexity, a goroutine is better,
-	// but we need to handle context.
-	// We'll run it synchronously for the PoC, or return "Started" and run async.
-	// Let's go with ASYNC to allow interrupts.
+	e.emitEvent(wf.ID, "workflow.started", map[string]any{
+		"workflow_id": wf.ID,
+		"name":        wf.Name,
+		"steps":       len(wf.Steps),
+	})
+
 	go e.runLoop(context.Background(), wf.ID)
+
+	return nil
+}
+
+// Resume resumes a paused workflow after human approval
+func (e *WorkflowExecutor) Resume(ctx context.Context, wfID domain.WorkflowID) error {
+	wf, err := e.repo.GetWorkflow(ctx, wfID)
+	if err != nil {
+		return fmt.Errorf("workflow not found: %w", err)
+	}
+	if wf.Status != domain.WorkflowStatusPaused {
+		return fmt.Errorf("workflow is not paused (status: %s)", wf.Status)
+	}
+
+	// Find the interrupted step and advance it
+	for i := range wf.Steps {
+		step := &wf.Steps[i]
+		if step.Status == domain.StepStatusPending && step.Interrupt != nil && step.Interrupt.Before {
+			// Before-interrupt: mark step ready to run, the runLoop will pick it up
+			// We leave status as Pending — runLoop will re-evaluate
+			break
+		}
+		if step.Status == domain.StepStatusDone && step.Interrupt != nil && step.Interrupt.After {
+			// After-interrupt: step already done, just need to continue the loop
+			break
+		}
+	}
+
+	wf.Status = domain.WorkflowStatusRunning
+	if err := e.repo.SaveWorkflow(ctx, wf); err != nil {
+		return err
+	}
+
+	e.emitEvent(wfID, "workflow.resumed", map[string]any{"workflow_id": wfID})
+
+	// Signal the resume channel if a goroutine is waiting
+	e.resumeChansMu.Lock()
+	ch, ok := e.resumeChans[wfID]
+	e.resumeChansMu.Unlock()
+	if ok {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	} else {
+		// No goroutine waiting — restart the loop
+		go e.runLoop(context.Background(), wfID)
+	}
+
+	return nil
+}
+
+// Cancel cancels a running or paused workflow
+func (e *WorkflowExecutor) Cancel(ctx context.Context, wfID domain.WorkflowID) error {
+	wf, err := e.repo.GetWorkflow(ctx, wfID)
+	if err != nil {
+		return fmt.Errorf("workflow not found: %w", err)
+	}
+
+	wf.Status = domain.WorkflowStatusCancelled
+	now := time.Now()
+	wf.CompletedAt = &now
+
+	// Cancel pending steps
+	for i := range wf.Steps {
+		if wf.Steps[i].Status == domain.StepStatusPending || wf.Steps[i].Status == domain.StepStatusRunning {
+			wf.Steps[i].Status = domain.StepStatusCancelled
+		}
+	}
+
+	if err := e.repo.SaveWorkflow(ctx, wf); err != nil {
+		return err
+	}
+
+	e.emitEvent(wfID, "workflow.cancelled", map[string]any{"workflow_id": wfID})
+
+	// Signal resume channel to unblock any waiting goroutine
+	e.resumeChansMu.Lock()
+	if ch, ok := e.resumeChans[wfID]; ok {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+	e.resumeChansMu.Unlock()
 
 	return nil
 }
@@ -56,18 +152,38 @@ func (e *WorkflowExecutor) Start(ctx context.Context, wf *domain.Workflow) error
 func (e *WorkflowExecutor) runLoop(ctx context.Context, id domain.WorkflowID) {
 	e.logger.Info("starting workflow execution loop", "workflow_id", id)
 
-	wf, err := e.repo.GetWorkflow(ctx, id)
-	if err != nil {
-		e.logger.Error("failed to load workflow", "error", err)
-		return
-	}
+	// Create resume channel for this workflow
+	resumeCh := make(chan struct{}, 1)
+	e.resumeChansMu.Lock()
+	e.resumeChans[id] = resumeCh
+	e.resumeChansMu.Unlock()
 
-	// 1. Check for Pending Steps that depend only on Completed steps
+	defer func() {
+		e.resumeChansMu.Lock()
+		delete(e.resumeChans, id)
+		e.resumeChansMu.Unlock()
+	}()
+
 	for {
-		// Reload state on each iteration
-		wf, err = e.repo.GetWorkflow(ctx, id)
+		wf, err := e.repo.GetWorkflow(ctx, id)
 		if err != nil {
+			e.logger.Error("failed to load workflow", "error", err)
 			return
+		}
+
+		if wf.Status == domain.WorkflowStatusPaused {
+			e.logger.Info("workflow paused, waiting for resume", "workflow_id", id)
+			// Block until resume signal
+			<-resumeCh
+			// Re-check status
+			wf, err = e.repo.GetWorkflow(ctx, id)
+			if err != nil {
+				return
+			}
+			if wf.Status != domain.WorkflowStatusRunning {
+				e.logger.Info("workflow not running after resume signal", "status", wf.Status)
+				return
+			}
 		}
 
 		if wf.Status != domain.WorkflowStatusRunning {
@@ -81,7 +197,7 @@ func (e *WorkflowExecutor) runLoop(ctx context.Context, id domain.WorkflowID) {
 		anyFailed := false
 
 		for i, step := range wf.Steps {
-			if step.Status == domain.StepStatusFailed || step.Status == domain.StepStatusCancelled {
+			if step.Status == domain.StepStatusFailed {
 				anyFailed = true
 			}
 			if step.Status != domain.StepStatusDone && step.Status != domain.StepStatusSkipped {
@@ -106,7 +222,7 @@ func (e *WorkflowExecutor) runLoop(ctx context.Context, id domain.WorkflowID) {
 		}
 
 		if len(runnableSteps) == 0 {
-			// No runnable steps? Check if we are waiting for running steps
+			// Check if we are waiting for running steps
 			runningCount := 0
 			for _, step := range wf.Steps {
 				if step.Status == domain.StepStatusRunning {
@@ -114,11 +230,9 @@ func (e *WorkflowExecutor) runLoop(ctx context.Context, id domain.WorkflowID) {
 				}
 			}
 			if runningCount > 0 {
-				// Wait a bit and retry (polling for now, ideally channels)
 				time.Sleep(1 * time.Second)
 				continue
 			}
-			// Deadlock or finished?
 			if !allDone {
 				e.failWorkflow(ctx, wf, "Deadlock detected: no runnable steps and not all done")
 				return
@@ -133,16 +247,7 @@ func (e *WorkflowExecutor) runLoop(ctx context.Context, id domain.WorkflowID) {
 				return e.executeStep(ctx, wf.ID, idx)
 			})
 		}
-		
-		// Wait for this batch triggers to *start* or complete?
-		// Actually, if we launch them, they become RUNNING.
-		// We should mark them RUNNING synchronously before launching.
-		// Refactor: executeStep handles the transition.
-		// For simplicity in this loop, we wait for the batch to finish? 
-		// No, true DAG engine allows pipelining. 
-		// BUT `executeStep` updates the DB.
-		// Let's just wait for the group to ensure state consistency for this iteration.
-		_ = g.Wait() 
+		_ = g.Wait()
 	}
 }
 
@@ -162,7 +267,6 @@ func (e *WorkflowExecutor) canRun(step domain.WorkflowStep, wf *domain.Workflow)
 			}
 		}
 		if !found {
-			// Dependency not found? Fail safe
 			return false
 		}
 	}
@@ -170,76 +274,114 @@ func (e *WorkflowExecutor) canRun(step domain.WorkflowStep, wf *domain.Workflow)
 }
 
 func (e *WorkflowExecutor) executeStep(ctx context.Context, wfID domain.WorkflowID, stepIdx int) error {
-	// 1. Load Workflow (to modify safe copy)
-	// Needs mutex/locking in real impl. For now reliance on atomic updates or loose consistency.
+	// Lock for safe read-modify-write
+	e.mu.Lock()
 	wf, err := e.repo.GetWorkflow(ctx, wfID)
 	if err != nil {
+		e.mu.Unlock()
 		return err
 	}
-	step := &wf.Steps[stepIdx] // Ptr to mutable
+	step := &wf.Steps[stepIdx]
 
-	// 2. Check Interrupt (Before)
+	// Check Before-Interrupt
 	if step.Interrupt != nil && step.Interrupt.Before {
 		wf.Status = domain.WorkflowStatusPaused
-		// We'd need to emit an event here.
-		e.logger.Info("workflow interrupted before step", "step", step.ID)
 		e.repo.SaveWorkflow(ctx, wf)
-		return nil // Stop execution path
+		e.mu.Unlock()
+
+		e.emitEvent(wfID, "step.interrupted", map[string]any{
+			"step_id": step.ID,
+			"phase":   "before",
+			"message": step.Interrupt.Message,
+		})
+		e.logger.Info("workflow interrupted before step", "step", step.ID)
+		return nil
 	}
 
-	// 3. Mark Running
+	// Mark Running
 	step.Status = domain.StepStatusRunning
 	now := time.Now()
 	step.StartedAt = &now
-	if err := e.repo.SaveWorkflow(ctx, wf); err != nil {
-		return err
-	}
+	e.repo.SaveWorkflow(ctx, wf)
+	e.mu.Unlock()
 
-	// 4. Interpolate Prompt
+	e.emitEvent(wfID, "step.started", map[string]any{
+		"step_id":    step.ID,
+		"step_index": stepIdx,
+	})
+
+	// Interpolate Prompt
 	prompt := interpolate(step.Prompt, wf.State)
 
-	// 5. Execute Agent
-	// Create a temporary conversation for this step context?
-	// Or use a "headless" execution mode?
-	// ReActAgentService.Chat expects a conversation.
-	// We'll create a transient conversation for this step.
-	// Step ID as Conversation ID? Or new UUID.
-	convID := domain.ConversationID(fmt.Sprintf("%s-%s", wf.ID, step.ID))
-	
-	// We need to inject the "Shared State" into the prompt context too?
-	// "Shared State: ..."
-	
-	resp, _, err := e.agent.Chat(ctx, convID, prompt, &step.PersonaID)
-	
-	// Reload WF to minimize race condition window
-	wf, _ = e.repo.GetWorkflow(ctx, wfID)
-	step = &wf.Steps[stepIdx] // Reset ptr
+	// Execute Agent
+	convID := domain.ConversationID(fmt.Sprintf("wf-%s-%s", wfID, step.ID))
 
-	if err != nil {
+	startTime := time.Now()
+	resp, _, agentErr := e.agent.Chat(ctx, convID, prompt, &step.PersonaID)
+	duration := time.Since(startTime)
+
+	// Lock again for result write
+	e.mu.Lock()
+	wf, _ = e.repo.GetWorkflow(ctx, wfID)
+	step = &wf.Steps[stepIdx]
+
+	if agentErr != nil {
 		step.Status = domain.StepStatusFailed
-		msg := err.Error()
+		msg := agentErr.Error()
 		step.Error = &msg
 		e.repo.SaveWorkflow(ctx, wf)
-		return err
+		e.mu.Unlock()
+
+		e.emitEvent(wfID, "step.failed", map[string]any{
+			"step_id": step.ID,
+			"error":   msg,
+		})
+		return agentErr
 	}
 
-	// 6. Update Result
+	// Update Result
 	step.Result = &domain.StepResult{
 		Output: resp.Response,
+		Metadata: map[string]interface{}{
+			"duration_ms": duration.Milliseconds(),
+			"iterations":  len(resp.Steps),
+		},
 	}
-	
-	// 7. Update Shared State (naive: put output into state["stepID"])
+
+	// Update Shared State
 	if wf.State == nil {
 		wf.State = make(map[string]any)
 	}
-	wf.State[step.ID] = resp.Response // Simple string output
-	// If output is JSON, could parse it? For now string.
+	wf.State[step.ID] = resp.Response
 
 	step.Status = domain.StepStatusDone
 	finished := time.Now()
 	step.CompletedAt = &finished
 
-	return e.repo.SaveWorkflow(ctx, wf)
+	// Check After-Interrupt
+	if step.Interrupt != nil && step.Interrupt.After {
+		wf.Status = domain.WorkflowStatusPaused
+		e.repo.SaveWorkflow(ctx, wf)
+		e.mu.Unlock()
+
+		e.emitEvent(wfID, "step.interrupted", map[string]any{
+			"step_id": step.ID,
+			"phase":   "after",
+			"message": step.Interrupt.Message,
+			"output":  resp.Response,
+		})
+		e.logger.Info("workflow interrupted after step", "step", step.ID)
+		return nil
+	}
+
+	e.repo.SaveWorkflow(ctx, wf)
+	e.mu.Unlock()
+
+	e.emitEvent(wfID, "step.completed", map[string]any{
+		"step_id":     step.ID,
+		"duration_ms": duration.Milliseconds(),
+	})
+	return nil
 }
 
 func (e *WorkflowExecutor) failWorkflow(ctx context.Context, wf *domain.Workflow, reason string) {
@@ -248,6 +390,11 @@ func (e *WorkflowExecutor) failWorkflow(ctx context.Context, wf *domain.Workflow
 	finished := time.Now()
 	wf.CompletedAt = &finished
 	e.repo.SaveWorkflow(ctx, wf)
+
+	e.emitEvent(wf.ID, "workflow.failed", map[string]any{
+		"workflow_id": wf.ID,
+		"error":       reason,
+	})
 }
 
 func (e *WorkflowExecutor) completeWorkflow(ctx context.Context, wf *domain.Workflow) {
@@ -255,6 +402,26 @@ func (e *WorkflowExecutor) completeWorkflow(ctx context.Context, wf *domain.Work
 	finished := time.Now()
 	wf.CompletedAt = &finished
 	e.repo.SaveWorkflow(ctx, wf)
+
+	e.emitEvent(wf.ID, "workflow.completed", map[string]any{
+		"workflow_id": wf.ID,
+		"state_keys":  len(wf.State),
+	})
+}
+
+// emitEvent publishes a workflow/step event through the EventBus
+func (e *WorkflowExecutor) emitEvent(wfID domain.WorkflowID, eventType string, data map[string]any) {
+	if e.eventBus == nil {
+		return
+	}
+
+	payload, _ := json.Marshal(data)
+	e.eventBus.Publish(Event{
+		JobID:     string(wfID),
+		Type:      EventType(eventType),
+		Data:      string(payload),
+		Timestamp: time.Now().UnixMilli(),
+	})
 }
 
 // interpolate replaces {{state.key}} with values

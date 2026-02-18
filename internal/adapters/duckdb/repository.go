@@ -125,6 +125,30 @@ func (r *Repository) migrate() error {
 			completed_at TIMESTAMP,
 			error TEXT
 		);`,
+		`CREATE TABLE IF NOT EXISTS scheduled_tasks (
+			id TEXT PRIMARY KEY,
+			project_id TEXT,
+			name TEXT NOT NULL DEFAULT '',
+			prompt TEXT NOT NULL DEFAULT '',
+			persona_id TEXT,
+			type TEXT NOT NULL DEFAULT 'one_shot',
+			cron_expr TEXT NOT NULL DEFAULT '',
+			interval_sec INTEGER NOT NULL DEFAULT 0,
+			next_run TIMESTAMP NOT NULL,
+			last_run TIMESTAMP,
+			last_result TEXT NOT NULL DEFAULT '',
+			run_count INTEGER NOT NULL DEFAULT 0,
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at TIMESTAMP NOT NULL,
+			created_by TEXT NOT NULL DEFAULT ''
+		);`,
+		`CREATE TABLE IF NOT EXISTS memories (
+			id TEXT PRIMARY KEY,
+			project_id TEXT NOT NULL,
+			content TEXT NOT NULL,
+			category TEXT NOT NULL DEFAULT 'fact',
+			created_at TIMESTAMP NOT NULL
+		);`,
 	}
 
 	for _, q := range queries {
@@ -768,10 +792,29 @@ func (r *Repository) DeleteArtifact(ctx context.Context, id domain.ArtifactID) e
 
 func (r *Repository) CreatePersona(ctx context.Context, p domain.Persona) error {
 	allowedJSON, _ := json.Marshal(p.AllowedTools)
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO personas (id, name, description, system_prompt, icon, color, allowed_tools, model_override, is_builtin, created_at, updated_at)
+
+	// For builtin personas, upsert to keep them up-to-date across versions.
+	// User-created personas use ON CONFLICT DO NOTHING.
+	var query string
+	if p.IsBuiltin {
+		query = `INSERT INTO personas (id, name, description, system_prompt, icon, color, allowed_tools, model_override, is_builtin, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT (id) DO NOTHING`,
+		 ON CONFLICT (id) DO UPDATE SET
+			name = excluded.name,
+			description = excluded.description,
+			system_prompt = excluded.system_prompt,
+			icon = excluded.icon,
+			color = excluded.color,
+			allowed_tools = excluded.allowed_tools,
+			model_override = excluded.model_override,
+			updated_at = excluded.updated_at`
+	} else {
+		query = `INSERT INTO personas (id, name, description, system_prompt, icon, color, allowed_tools, model_override, is_builtin, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT (id) DO NOTHING`
+	}
+
+	_, err := r.db.ExecContext(ctx, query,
 		p.ID, p.Name, p.Description, p.SystemPrompt, p.Icon, p.Color, string(allowedJSON), p.ModelOverride, p.IsBuiltin, p.CreatedAt, p.UpdatedAt,
 	)
 	return err

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/manthysbr/auleOS/internal/config"
 	"github.com/manthysbr/auleOS/internal/core/domain"
@@ -17,23 +18,25 @@ import (
 )
 
 type Server struct {
-	logger      *slog.Logger
-	lifecycle   *services.WorkerLifecycle
-	reactAgent  *services.ReActAgentService
-	eventBus    *services.EventBus
-	settings    *config.SettingsStore
-	convStore   *services.ConversationStore
-	modelRouter *services.ModelRouter
-	discovery   *services.ModelDiscovery
-	capRouter   *services.CapabilityRouter
-	synapseRT   *synapse.Runtime
+	logger       *slog.Logger
+	lifecycle    *services.WorkerLifecycle
+	reactAgent   *services.ReActAgentService
+	eventBus     *services.EventBus
+	settings     *config.SettingsStore
+	convStore    *services.ConversationStore
+	modelRouter  *services.ModelRouter
+	discovery    *services.ModelDiscovery
+	capRouter    *services.CapabilityRouter
+	synapseRT    *synapse.Runtime
 	workflowExec *services.WorkflowExecutor
-	workerMgr   interface {
+	tracer       *services.TraceCollector
+	workerMgr    interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	}
 	repo interface {
 		GetJob(ctx context.Context, id domain.JobID) (domain.Job, error)
 		ListJobs(ctx context.Context) ([]domain.Job, error)
+		SaveJob(ctx context.Context, job domain.Job) error
 		CreateProject(ctx context.Context, proj domain.Project) error
 		GetProject(ctx context.Context, id domain.ProjectID) (domain.Project, error)
 		ListProjects(ctx context.Context) ([]domain.Project, error)
@@ -54,6 +57,11 @@ type Server struct {
 		GetWorkflow(ctx context.Context, id domain.WorkflowID) (*domain.Workflow, error)
 		SaveWorkflow(ctx context.Context, wf *domain.Workflow) error
 		ListWorkflows(ctx context.Context) ([]domain.Workflow, error)
+		// Scheduled Tasks
+		SaveScheduledTask(ctx context.Context, task *domain.ScheduledTask) error
+		GetScheduledTask(ctx context.Context, id domain.ScheduledTaskID) (*domain.ScheduledTask, error)
+		ListScheduledTasks(ctx context.Context) ([]domain.ScheduledTask, error)
+		DeleteScheduledTask(ctx context.Context, id domain.ScheduledTaskID) error
 	}
 }
 
@@ -72,12 +80,14 @@ func NewServer(
 	capRouter *services.CapabilityRouter,
 	synapseRT *synapse.Runtime,
 	workflowExec *services.WorkflowExecutor,
+	tracer *services.TraceCollector,
 	workerMgr interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	},
 	repo interface {
 		GetJob(ctx context.Context, id domain.JobID) (domain.Job, error)
 		ListJobs(ctx context.Context) ([]domain.Job, error)
+		SaveJob(ctx context.Context, job domain.Job) error
 		CreateProject(ctx context.Context, proj domain.Project) error
 		GetProject(ctx context.Context, id domain.ProjectID) (domain.Project, error)
 		ListProjects(ctx context.Context) ([]domain.Project, error)
@@ -98,6 +108,11 @@ func NewServer(
 		GetWorkflow(ctx context.Context, id domain.WorkflowID) (*domain.Workflow, error)
 		SaveWorkflow(ctx context.Context, wf *domain.Workflow) error
 		ListWorkflows(ctx context.Context) ([]domain.Workflow, error)
+		// Scheduled Tasks
+		SaveScheduledTask(ctx context.Context, task *domain.ScheduledTask) error
+		GetScheduledTask(ctx context.Context, id domain.ScheduledTaskID) (*domain.ScheduledTask, error)
+		ListScheduledTasks(ctx context.Context) ([]domain.ScheduledTask, error)
+		DeleteScheduledTask(ctx context.Context, id domain.ScheduledTaskID) error
 	}) *Server {
 	return &Server{
 		logger:       logger,
@@ -111,6 +126,7 @@ func NewServer(
 		capRouter:    capRouter,
 		synapseRT:    synapseRT,
 		workflowExec: workflowExec,
+		tracer:       tracer,
 		workerMgr:    workerMgr,
 		repo:         repo,
 	}
@@ -133,6 +149,25 @@ func (s *Server) Handler() http.Handler {
 			s.handleConversationSSE(w, r)
 			return
 		}
+		// Intercept SSE endpoint for workflow events
+		if r.Method == "GET" && isWorkflowEventsPath(r.URL.Path) {
+			s.handleWorkflowSSE(w, r)
+			return
+		}
+		// Intercept SSE endpoint for broadcast/global agent events
+		if r.Method == "GET" && r.URL.Path == "/v1/events" {
+			s.handleBroadcastSSE(w, r)
+			return
+		}
+		// Tracing API — Genkit-style observability
+		if r.Method == "GET" && r.URL.Path == "/v1/traces" {
+			s.handleListTraces(w, r)
+			return
+		}
+		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/traces/") {
+			s.handleGetTrace(w, r)
+			return
+		}
 		mux.ServeHTTP(w, r)
 	})
 }
@@ -141,6 +176,17 @@ func (s *Server) Handler() http.Handler {
 func isConversationEventsPath(path string) bool {
 	// Pattern: /v1/conversations/<uuid>/events
 	const prefix = "/v1/conversations/"
+	const suffix = "/events"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return false
+	}
+	middle := path[len(prefix) : len(path)-len(suffix)]
+	return len(middle) > 0 && !strings.Contains(middle, "/")
+}
+
+// isWorkflowEventsPath checks if an URL path matches /v1/workflows/{id}/events
+func isWorkflowEventsPath(path string) bool {
+	const prefix = "/v1/workflows/"
 	const suffix = "/events"
 	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
 		return false
@@ -432,7 +478,11 @@ func (s *Server) AgentChat(ctx context.Context, request AgentChatRequestObject) 
 		conversationID = string(retConvID)
 
 		apiSteps := make([]ReActStep, 0, len(reactResp.Steps))
+		hasToolCalls := false
 		for _, step := range reactResp.Steps {
+			if step.Action != "" {
+				hasToolCalls = true
+			}
 			apiStep := ReActStep{}
 			if step.Thought != "" {
 				value := step.Thought
@@ -480,6 +530,44 @@ func (s *Server) AgentChat(ctx context.Context, request AgentChatRequestObject) 
 					Name: &name,
 					Args: &args,
 				}
+			}
+		}
+
+		// Create a Job record for chat operations that involved tool calls
+		// This makes agentic work visible in the Jobs view
+		if hasToolCalls {
+			jobID := domain.JobID("chat-" + conversationID[:min(8, len(conversationID))] + "-" + fmt.Sprintf("%d", time.Now().UnixMilli()))
+			toolNames := []string{}
+			for _, step := range reactResp.Steps {
+				if step.Action != "" {
+					toolNames = append(toolNames, step.Action)
+				}
+			}
+			resultStr := response
+			if len(resultStr) > 200 {
+				resultStr = resultStr[:200] + "..."
+			}
+			chatJob := domain.Job{
+				ID:     jobID,
+				Status: domain.JobStatusCompleted,
+				Result: &resultStr,
+				Spec: domain.WorkerSpec{
+					Image: "agent-chat",
+					Tags: map[string]string{
+						"type": "chat",
+					},
+				},
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+				Metadata: map[string]string{
+					"type":            "agent_chat",
+					"conversation_id": conversationID,
+					"tools_used":      strings.Join(toolNames, ","),
+					"message":         msg,
+				},
+			}
+			if err := s.repo.SaveJob(ctx, chatJob); err != nil {
+				s.logger.Warn("failed to save chat job record", "error", err)
 			}
 		}
 	} else {
@@ -598,4 +686,46 @@ func (s *Server) handleListCapabilities(w http.ResponseWriter, r *http.Request) 
 		"capabilities": caps,
 		"stats":        stats,
 	})
+}
+
+// --- Tracing API (Genkit-style observability) ---
+
+// handleListTraces returns recent traces.
+// GET /v1/traces?limit=50
+func (s *Server) handleListTraces(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := fmt.Sscanf(l, "%d", &limit); n == 1 && err == nil && limit > 0 {
+			if limit > 500 {
+				limit = 500
+			}
+		}
+	}
+
+	traces := s.tracer.ListTraces(limit)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"traces": traces,
+		"count":  len(traces),
+	})
+}
+
+// handleGetTrace returns a single trace with all spans.
+// GET /v1/traces/{id}
+func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
+	// Extract ID from path: /v1/traces/{id}
+	path := strings.TrimPrefix(r.URL.Path, "/v1/traces/")
+	if path == "" || strings.Contains(path, "/") {
+		http.Error(w, "invalid trace id", http.StatusBadRequest)
+		return
+	}
+
+	trace, err := s.tracer.GetTrace(domain.TraceID(path))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(trace)
 }

@@ -88,7 +88,7 @@ When creating:
 Be bold and imaginative.`,
 			Icon:         "palette",
 			Color:        "violet",
-			AllowedTools: []string{"generate_image", "generate_text"},
+			AllowedTools: nil, // all tools — system prompt guides tool preferences
 			IsBuiltin:    true,
 			CreatedAt:    now,
 			UpdatedAt:    now,
@@ -105,10 +105,11 @@ When helping with code:
 - Use code blocks with language tags
 - Suggest tests when relevant
 - Be opinionated about best practices
+Use exec, read_file, write_file, edit_file, list_dir and other tools proactively.
 Respect the user's stack and conventions.`,
 			Icon:         "code",
 			Color:        "amber",
-			AllowedTools: []string{"generate_text"},
+			AllowedTools: nil, // all tools — system prompt guides tool preferences
 			IsBuiltin:    true,
 			CreatedAt:    now,
 			UpdatedAt:    now,

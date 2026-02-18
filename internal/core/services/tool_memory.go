@@ -51,13 +51,18 @@ func NewMemorySaveTool(ws *WorkspaceManager) *domain.Tool {
 			if projectID == "" {
 				if pID, found := GetProjectFromContext(ctx); found {
 					projectID = string(pID)
-				} else {
-					return nil, fmt.Errorf("project_id required (memory is project-scoped)")
 				}
 			}
 
 			// Resolve Path
-			projectPath := ws.GetProjectPath(projectID)
+			var projectPath string
+			if projectID != "" {
+				projectPath = ws.GetProjectPath(projectID)
+			} else {
+				home, _ := os.UserHomeDir()
+				projectPath = filepath.Join(home, ".aule", "global")
+				_ = os.MkdirAll(projectPath, 0755)
+			}
 			memoryPath := filepath.Join(projectPath, MemoryFileName)
 
 			// Format Entry
@@ -103,13 +108,18 @@ func NewMemoryReadTool(ws *WorkspaceManager) *domain.Tool {
 			if projectID == "" {
 				if pID, found := GetProjectFromContext(ctx); found {
 					projectID = string(pID)
-				} else {
-					return nil, fmt.Errorf("project_id required")
 				}
 			}
 
 			// Resolve Path
-			projectPath := ws.GetProjectPath(projectID)
+			var projectPath string
+			if projectID != "" {
+				projectPath = ws.GetProjectPath(projectID)
+			} else {
+				home, _ := os.UserHomeDir()
+				projectPath = filepath.Join(home, ".aule", "global")
+				_ = os.MkdirAll(projectPath, 0755)
+			}
 			memoryPath := filepath.Join(projectPath, MemoryFileName)
 
 			// Read file
@@ -122,6 +132,95 @@ func NewMemoryReadTool(ws *WorkspaceManager) *domain.Tool {
 			}
 
 			return string(data), nil
+		},
+	}
+}
+
+// NewMemorySearchTool returns a tool that searches the project's long-term memory by keyword.
+func NewMemorySearchTool(ws *WorkspaceManager) *domain.Tool {
+	return &domain.Tool{
+		Name:        "memory_search",
+		Description: "Searches the project's long-term memory for entries matching a keyword or phrase. Returns matching lines from MEMORY.md. Use this to find specific preferences, decisions, or facts.",
+		Parameters: domain.ToolParameters{
+			Type: "object",
+			Properties: map[string]interface{}{
+				"query": map[string]interface{}{
+					"type":        "string",
+					"description": "Keyword or phrase to search for (case-insensitive).",
+				},
+				"category": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional: filter by category (preference, decision, fact, context).",
+				},
+				"project_id": map[string]interface{}{
+					"type":        "string",
+					"description": "The project ID. If not provided, inferred from context.",
+				},
+			},
+			Required: []string{"query"},
+		},
+		ExecutionType: domain.ExecNative,
+		Execute: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			query, _ := params["query"].(string)
+			category, _ := params["category"].(string)
+			projectID, _ := params["project_id"].(string)
+
+			if query == "" {
+				return nil, fmt.Errorf("query is required")
+			}
+
+			if projectID == "" {
+				if pID, found := GetProjectFromContext(ctx); found {
+					projectID = string(pID)
+				}
+			}
+
+			var projectPath string
+			if projectID != "" {
+				projectPath = ws.GetProjectPath(projectID)
+			} else {
+				home, _ := os.UserHomeDir()
+				projectPath = filepath.Join(home, ".aule", "global")
+				_ = os.MkdirAll(projectPath, 0755)
+			}
+			memoryPath := filepath.Join(projectPath, MemoryFileName)
+
+			data, err := os.ReadFile(memoryPath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					return "No memories found (memory is empty).", nil
+				}
+				return nil, fmt.Errorf("failed to read memory: %w", err)
+			}
+
+			queryLower := strings.ToLower(query)
+			categoryUpper := strings.ToUpper(category)
+
+			lines := strings.Split(string(data), "\n")
+			var matches []string
+
+			for _, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if trimmed == "" {
+					continue
+				}
+
+				// Category filter
+				if category != "" && !strings.Contains(trimmed, "**"+categoryUpper+"**") {
+					continue
+				}
+
+				// Keyword match (case-insensitive)
+				if strings.Contains(strings.ToLower(trimmed), queryLower) {
+					matches = append(matches, trimmed)
+				}
+			}
+
+			if len(matches) == 0 {
+				return fmt.Sprintf("No memories matching '%s' found.", query), nil
+			}
+
+			return fmt.Sprintf("Found %d matching memories:\n%s", len(matches), strings.Join(matches, "\n")), nil
 		},
 	}
 }

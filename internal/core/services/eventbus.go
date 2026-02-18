@@ -27,9 +27,10 @@ type Subscription struct {
 }
 
 type EventBus struct {
-	logger *slog.Logger
-	mu     sync.RWMutex
-	subs   map[string][]chan Event // Key: JobID
+	logger   *slog.Logger
+	mu       sync.RWMutex
+	subs     map[string][]chan Event // Key: JobID
+	globalCh []chan Event            // Subscribers that receive ALL events
 }
 
 func NewEventBus(logger *slog.Logger) *EventBus {
@@ -37,6 +38,30 @@ func NewEventBus(logger *slog.Logger) *EventBus {
 		logger: logger,
 		subs:   make(map[string][]chan Event),
 	}
+}
+
+// SubscribeGlobal returns a channel that receives all events (broadcast + job events).
+// Useful for the frontend to receive proactive agent messages without knowing job IDs.
+func (b *EventBus) SubscribeGlobal() (<-chan Event, func()) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	ch := make(chan Event, 100)
+	b.globalCh = append(b.globalCh, ch)
+
+	unsub := func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		for i, sub := range b.globalCh {
+			if sub == ch {
+				close(ch)
+				b.globalCh = append(b.globalCh[:i], b.globalCh[i+1:]...)
+				break
+			}
+		}
+	}
+
+	return ch, unsub
 }
 
 // Subscribe returns a channel that receives events for a specific job
@@ -70,22 +95,29 @@ func (b *EventBus) Subscribe(jobID string) (<-chan Event, func()) {
 	return ch, unsub
 }
 
-// Publish sends an event to all subscribers of the job
+// Publish sends an event to all subscribers of the job AND global subscribers
 func (b *EventBus) Publish(e Event) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
+	// Send to job-specific subscribers
 	subscribers, ok := b.subs[e.JobID]
-	if !ok {
-		return
+	if ok {
+		for _, ch := range subscribers {
+			select {
+			case ch <- e:
+			default:
+				b.logger.Warn("event bus channel full, dropping event", "job_id", e.JobID)
+			}
+		}
 	}
 
-	for _, ch := range subscribers {
+	// Send to global subscribers (broadcast channel + all events)
+	for _, ch := range b.globalCh {
 		select {
 		case ch <- e:
 		default:
-			// If channel is full, drop event to prevent blocking application
-			b.logger.Warn("event bus channel full, dropping event", "job_id", e.JobID)
+			b.logger.Warn("event bus global channel full, dropping event", "job_id", e.JobID)
 		}
 	}
 }

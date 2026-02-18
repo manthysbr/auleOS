@@ -12,7 +12,7 @@ const viewLabels: Record<string, string> = {
 }
 
 export function TopBar() {
-    const { activeView, activeProjectId, chatPanelOpen, toggleChatPanel } = useUIStore()
+    const { activeView, activeProjectId, chatWindowOpen, toggleChatWindow } = useUIStore()
     const { projects } = useProjectStore()
 
     const activeProject = projects.find((p) => p.id === activeProjectId)
@@ -35,13 +35,15 @@ export function TopBar() {
             {/* Right: chat toggle */}
             <div className="flex items-center gap-2">
                 <button
-                    onClick={toggleChatPanel}
-                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1.5 rounded-lg hover:bg-accent"
-                    title={chatPanelOpen ? "Hide Chat (⌘J)" : "Show Chat (⌘J)"}
+                    onClick={toggleChatWindow}
+                    className={`flex items-center gap-1.5 text-xs transition-colors px-2 py-1.5 rounded-lg hover:bg-accent ${
+                        chatWindowOpen ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    title={chatWindowOpen ? "Fechar chat (⌘J)" : "Abrir chat (⌘J)"}
                 >
                     <MessageSquareText className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">Chat</span>
-                    {chatPanelOpen ? (
+                    {chatWindowOpen ? (
                         <PanelRightClose className="w-3.5 h-3.5" />
                     ) : (
                         <PanelRightOpen className="w-3.5 h-3.5" />

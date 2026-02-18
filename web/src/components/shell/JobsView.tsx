@@ -58,27 +58,33 @@ export function JobsView() {
                     const Icon = statusIcon[status] || AlertCircle
                     const color = statusColor[status] || "text-muted-foreground"
                     return (
-                        <div
-                            key={job.id}
-                            className="flex items-center gap-3 p-3 rounded-xl bg-card/60 border border-border/50 hover:bg-accent/30 transition-colors"
-                        >
-                            <Icon className={cn("w-4 h-4 flex-shrink-0", color, status === "RUNNING" && "animate-spin")} />
-                            <div className="flex-1 min-w-0">
-                                <p className="text-sm font-mono truncate">{job.id}</p>
-                                {job.result && (
-                                    <p className="text-xs text-muted-foreground truncate">{job.result}</p>
-                                )}
-                                {job.error && (
-                                    <p className="text-xs text-red-500 truncate">{job.error}</p>
-                                )}
-                            </div>
-                            <span className={cn("text-xs font-medium uppercase", color)}>{status}</span>
-                            {job.created_at && (
-                                <span className="text-[10px] text-muted-foreground">
-                                    {new Date(job.created_at).toLocaleTimeString()}
-                                </span>
-                            )}
-                        </div>
+            <div
+                key={job.id}
+                className="flex items-center gap-3 p-3 rounded-xl bg-card/60 border border-border/50 hover:bg-accent/30 transition-colors"
+            >
+                <Icon className={cn("w-4 h-4 flex-shrink-0", color, status === "RUNNING" && "animate-spin")} />
+                <div className="flex-1 min-w-0">
+                    <p className="text-sm font-mono truncate">{job.id}</p>
+                    {job.result && (
+                        <p className="text-xs text-muted-foreground truncate">{job.result}</p>
+                    )}
+                    {job.error && (
+                        <p className="text-xs text-red-500 truncate">{job.error}</p>
+                    )}
+                    {/* Show tools used for agent chat jobs */}
+                    {(job as any).metadata?.tools_used && (
+                        <p className="text-[10px] text-primary/70 truncate">
+                            tools: {(job as any).metadata.tools_used}
+                        </p>
+                    )}
+                </div>
+                <span className={cn("text-xs font-medium uppercase", color)}>{status}</span>
+                {job.created_at && (
+                    <span className="text-[10px] text-muted-foreground">
+                        {new Date(job.created_at).toLocaleTimeString()}
+                    </span>
+                )}
+            </div>
                     )
                 })}
             </div>

@@ -69,3 +69,100 @@ func (s *Server) handleConversationSSE(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+// handleWorkflowSSE is the raw HTTP handler for SSE streaming of workflow events.
+// It subscribes to the EventBus using the workflow ID as the key, and streams
+// workflow.started, workflow.completed, step.started, step.completed, etc.
+func (s *Server) handleWorkflowSSE(w http.ResponseWriter, r *http.Request) {
+	// Extract workflow ID from path: /v1/workflows/{id}/events
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	var wfID string
+	if len(parts) >= 3 {
+		wfID = parts[2] // v1/workflows/{id}/events → index 2
+	}
+	if wfID == "" {
+		http.Error(w, "missing workflow id", http.StatusBadRequest)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	// Send initial connected event
+	fmt.Fprintf(w, "event: connected\ndata: {\"workflow_id\":\"%s\"}\n\n", wfID)
+	flusher.Flush()
+
+	// Subscribe to events for this workflow
+	ch, unsub := s.eventBus.Subscribe(wfID)
+	defer unsub()
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case evt, ok := <-ch:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, evt.Data)
+			flusher.Flush()
+
+			// Close stream when workflow terminates
+			switch string(evt.Type) {
+			case "workflow.completed", "workflow.failed", "workflow.cancelled":
+				return
+			}
+		}
+	}
+}
+
+// handleBroadcastSSE serves the global SSE stream for proactive agent messages.
+// Clients subscribe to /v1/events to receive messages from heartbeat, cron, spawn,
+// and any other background agent activity — without needing to know job/conv IDs.
+func (s *Server) handleBroadcastSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	// Send initial connected event
+	fmt.Fprintf(w, "event: connected\ndata: {\"channel\":\"broadcast\"}\n\n")
+	flusher.Flush()
+
+	// Subscribe to global events (broadcast channel — all background agent activity)
+	ch, unsub := s.eventBus.SubscribeGlobal()
+	defer unsub()
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case evt, ok := <-ch:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, evt.Data)
+			flusher.Flush()
+		}
+	}
+}

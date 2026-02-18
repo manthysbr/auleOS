@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"net/http"
@@ -103,17 +104,6 @@ func run(logger *slog.Logger) error {
 
 	lifecycle := services.NewWorkerLifecycle(logger, jobScheduler, workerMgr, repo, workspaceMgr, eventBus, llmProvider, imageProvider)
 
-	// Hot-reload: when settings change, rebuild providers and swap in lifecycle
-	settingsStore.OnChange(func(cfg *domain.AppConfig) {
-		newLLM, newImage, err := providers.Build(cfg)
-		if err != nil {
-			logger.Error("failed to rebuild providers on settings change", "error", err)
-			return
-		}
-		lifecycle.UpdateProviders(newLLM, newImage)
-		logger.Info("providers hot-reloaded from settings change")
-	})
-
 	// Tool Registry - register available tools
 	toolRegistry := domain.NewToolRegistry()
 	generateImageTool := services.NewGenerateImageTool(lifecycle)
@@ -169,11 +159,31 @@ func run(logger *slog.Logger) error {
 	// Model Router - resolves which model to use per persona/role
 	modelRouter := services.NewModelRouter(logger, llmProvider)
 
+	// Trace Collector — observability engine (Genkit-style tracing)
+	traceCollector := services.NewTraceCollector(logger, eventBus)
+
+	// Hot-reload: when settings change, rebuild providers and swap in lifecycle + model router
+	settingsStore.OnChange(func(cfg *domain.AppConfig) {
+		newLLM, newImage, err := providers.Build(cfg)
+		if err != nil {
+			logger.Error("failed to rebuild providers on settings change", "error", err)
+			return
+		}
+		lifecycle.UpdateProviders(newLLM, newImage)
+		modelRouter.UpdateProvider(newLLM)
+		logger.Info("providers hot-reloaded from settings change")
+	})
+
 	// Model Discovery - detect installed Ollama models on startup
 	discovery := services.NewModelDiscovery(logger)
 	ollamaURL := config.Providers.LLM.LocalURL
 	if ollamaURL == "" {
 		ollamaURL = "http://localhost:11434"
+	}
+	// Strip /v1 suffix — Ollama native API is at /api/tags, not /v1/api/tags
+	ollamaURL = strings.TrimRight(strings.TrimSpace(ollamaURL), "/")
+	if strings.HasSuffix(ollamaURL, "/v1") {
+		ollamaURL = strings.TrimSuffix(ollamaURL, "/v1")
 	}
 	if discovered, err := discovery.DiscoverOllama(ctx, ollamaURL); err == nil && len(discovered) > 0 {
 		modelRouter.SetCatalog(discovered)
@@ -216,13 +226,17 @@ func run(logger *slog.Logger) error {
 		logger.Error("failed to register list_dir tool", "error", err)
 	}
 	// Exec Tool
-	execTool := services.NewExecTool(lifecycle, repo)
+	execTool := services.NewExecTool(workspaceMgr)
 	if err := toolRegistry.Register(execTool); err != nil {
 		logger.Error("failed to register exec tool", "error", err)
 	}
 	// Web Search Tool
 	if err := toolRegistry.Register(services.NewWebSearchTool()); err != nil {
 		logger.Error("failed to register web_search tool", "error", err)
+	}
+	// Web Fetch Tool
+	if err := toolRegistry.Register(services.NewWebFetchTool()); err != nil {
+		logger.Error("failed to register web_fetch tool", "error", err)
 	}
 	// Memory Tools
 	if err := toolRegistry.Register(services.NewMemorySaveTool(workspaceMgr)); err != nil {
@@ -231,9 +245,19 @@ func run(logger *slog.Logger) error {
 	if err := toolRegistry.Register(services.NewMemoryReadTool(workspaceMgr)); err != nil {
 		logger.Error("failed to register memory_read tool", "error", err)
 	}
+	if err := toolRegistry.Register(services.NewMemorySearchTool(workspaceMgr)); err != nil {
+		logger.Error("failed to register memory_search tool", "error", err)
+	}
+	// FS Tools — edit_file, append_file
+	if err := toolRegistry.Register(services.NewEditFileTool(workspaceMgr)); err != nil {
+		logger.Error("failed to register edit_file tool", "error", err)
+	}
+	if err := toolRegistry.Register(services.NewAppendFileTool(workspaceMgr)); err != nil {
+		logger.Error("failed to register append_file tool", "error", err)
+	}
 
-	// ReAct Agent Service - agentic reasoning with tools + model routing
-	reactAgent := services.NewReActAgentService(logger, llmProvider, modelRouter, toolRegistry, convStore, repo, workspaceMgr)
+	// ReAct Agent Service - agentic reasoning with tools + model routing + tracing
+	reactAgent := services.NewReActAgentService(logger, llmProvider, modelRouter, toolRegistry, convStore, repo, workspaceMgr, traceCollector)
 
 	// Seed built-in personas (idempotent — ON CONFLICT DO NOTHING)
 	for _, p := range domain.BuiltinPersonas() {
@@ -247,8 +271,8 @@ func run(logger *slog.Logger) error {
 	capRouter := services.NewCapabilityRouter(logger, wasmRT)
 
 	// Workflow Engine (M12)
-	workflowExec := services.NewWorkflowExecutor(logger, repo, reactAgent)
-	
+	workflowExec := services.NewWorkflowExecutor(logger, repo, reactAgent, eventBus)
+
 	// Register Workflow Tools
 	if err := toolRegistry.Register(services.NewCreateWorkflowTool(repo)); err != nil {
 		logger.Error("failed to register create_workflow tool", "error", err)
@@ -256,9 +280,42 @@ func run(logger *slog.Logger) error {
 	if err := toolRegistry.Register(services.NewRunWorkflowTool(workflowExec, repo)); err != nil {
 		logger.Error("failed to register run_workflow tool", "error", err)
 	}
+	if err := toolRegistry.Register(services.NewListWorkflowsTool(repo)); err != nil {
+		logger.Error("failed to register list_workflows tool", "error", err)
+	}
+
+	// Scheduled Task Tools (M11)
+	if err := toolRegistry.Register(services.NewScheduleTaskTool(repo)); err != nil {
+		logger.Error("failed to register schedule_task tool", "error", err)
+	}
+	if err := toolRegistry.Register(services.NewListScheduledTasksTool(repo)); err != nil {
+		logger.Error("failed to register list_scheduled_tasks tool", "error", err)
+	}
+	if err := toolRegistry.Register(services.NewCancelScheduledTaskTool(repo)); err != nil {
+		logger.Error("failed to register cancel_scheduled_task tool", "error", err)
+	}
+	if err := toolRegistry.Register(services.NewToggleScheduledTaskTool(repo)); err != nil {
+		logger.Error("failed to register toggle_scheduled_task tool", "error", err)
+	}
+
+	// Message Tool — proactive communication from agent to user (PicoClaw pattern)
+	if err := toolRegistry.Register(services.NewMessageTool(eventBus)); err != nil {
+		logger.Error("failed to register message tool", "error", err)
+	}
+
+	// Spawn Tool — async background sub-agent (PicoClaw pattern)
+	if err := toolRegistry.Register(services.NewSpawnTool(subOrchestrator, eventBus, logger)); err != nil {
+		logger.Error("failed to register spawn tool", "error", err)
+	}
 
 	// Initialize Kernel API Server
-	apiServer := kernel.NewServer(logger, lifecycle, reactAgent, eventBus, settingsStore, convStore, modelRouter, discovery, capRouter, wasmRT, workflowExec, workerMgr, repo)
+	apiServer := kernel.NewServer(logger, lifecycle, reactAgent, eventBus, settingsStore, convStore, modelRouter, discovery, capRouter, wasmRT, workflowExec, traceCollector, workerMgr, repo)
+
+	// CronScheduler — executes scheduled tasks (M11)
+	cronScheduler := services.NewCronScheduler(logger, repo, reactAgent, eventBus)
+
+	// HeartbeatService — processes HEARTBEAT.md checklists (M11)
+	heartbeatSvc := services.NewHeartbeatService(logger, workspaceMgr, reactAgent, repo, 30*time.Minute)
 
 	// Setup HTTP Server
 	// CORS Configuration
@@ -300,6 +357,16 @@ func run(logger *slog.Logger) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return httpServer.Shutdown(shutdownCtx)
+	})
+
+	// 4. CronScheduler loop (M11)
+	g.Go(func() error {
+		return cronScheduler.Run(gCtx)
+	})
+
+	// 5. HeartbeatService loop (M11)
+	g.Go(func() error {
+		return heartbeatSvc.Run(gCtx)
 	})
 
 	return g.Wait()

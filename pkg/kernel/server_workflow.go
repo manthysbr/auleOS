@@ -20,7 +20,7 @@ func (s *Server) CreateWorkflow(ctx context.Context, request CreateWorkflowReque
 		if stepReq.Id != nil {
 			stepID = *stepReq.Id
 		}
-		
+
 		var personaID domain.PersonaID
 		if stepReq.PersonaId != nil {
 			personaID = domain.PersonaID(*stepReq.PersonaId)
@@ -66,12 +66,12 @@ func (s *Server) CreateWorkflow(ctx context.Context, request CreateWorkflowReque
 	}
 
 	wf := &domain.Workflow{
-		ID:          id,
-		Name:        req.Name,
-		Steps:       steps,
-		Status:      domain.WorkflowStatusPending,
-		CreatedAt:   time.Now(),
-		State:       make(map[string]any),
+		ID:        id,
+		Name:      req.Name,
+		Steps:     steps,
+		Status:    domain.WorkflowStatusPending,
+		CreatedAt: time.Now(),
+		State:     make(map[string]any),
 	}
 
 	if req.ProjectId != nil {
@@ -88,10 +88,10 @@ func (s *Server) CreateWorkflow(ctx context.Context, request CreateWorkflowReque
 
 	status := WorkflowStatus(wf.Status)
 	return CreateWorkflow201JSONResponse{
-		Id:          toPtr(string(wf.ID)),
-		Name:        toPtr(wf.Name),
-		Status:      &status,
-		CreatedAt:   &wf.CreatedAt,
+		Id:        toPtr(string(wf.ID)),
+		Name:      toPtr(wf.Name),
+		Status:    &status,
+		CreatedAt: &wf.CreatedAt,
 	}, nil
 }
 
@@ -163,17 +163,17 @@ func (s *Server) RunWorkflow(ctx context.Context, request RunWorkflowRequestObje
 	// Wait, let's check spec again.
 	// Generated code types?
 	// RunWorkflow200JSONResponse content...
-	
-	// Let's assume it generated an anonymous struct. 
+
+	// Let's assume it generated an anonymous struct.
 	// If generated struct has Status *string, then toPtr(string(wf.Status)) is correct.
 	// Build error said: "cannot use toPtr(string(wf.Status)) (value of type *string) as *WorkflowStatus value in struct literal" at line 136?
-	// Line 136 was likely GetWorkflow return or CreateWorkflow return. 
+	// Line 136 was likely GetWorkflow return or CreateWorkflow return.
 	// RunWorkflow was later.
-	
+
 	// I'll stick to string pointer here if spec defined it as string.
 	// If it defined ref, I need cast.
 	// Spec: "status: type: string". So it's string.
-	
+
 	return RunWorkflow200JSONResponse{
 		Id:     toPtr(string(wf.ID)),
 		Status: toPtr(string(wf.Status)),
@@ -182,9 +182,16 @@ func (s *Server) RunWorkflow(ctx context.Context, request RunWorkflowRequestObje
 
 // ResumeWorkflow implements StrictServerInterface
 func (s *Server) ResumeWorkflow(ctx context.Context, request ResumeWorkflowRequestObject) (ResumeWorkflowResponseObject, error) {
-	// Not implemented in executor yet, but handler placeholder
+	wfID := domain.WorkflowID(request.Id)
+	if err := s.workflowExec.Resume(ctx, wfID); err != nil {
+		s.logger.Error("failed to resume workflow", "error", err)
+		return ResumeWorkflow200JSONResponse{
+			Status: toPtr(fmt.Sprintf("error: %v", err)),
+		}, nil
+	}
+
 	return ResumeWorkflow200JSONResponse{
-		Status: toPtr("resumed"), // Mock
+		Status: toPtr("resumed"),
 	}, nil
 }
 
@@ -203,7 +210,7 @@ func (s *Server) ListWorkflows(ctx context.Context, request ListWorkflowsRequest
 	response := make([]Workflow, len(workflows))
 	for i, wf := range workflows {
 		wfStatus := WorkflowStatus(wf.Status)
-		
+
 		// Simplify steps for list view? Spec says return Workflow full object.
 		apiSteps := make([]WorkflowStep, len(wf.Steps))
 		for j, step := range wf.Steps {
@@ -239,4 +246,3 @@ func (s *Server) ListWorkflows(ctx context.Context, request ListWorkflowsRequest
 
 	return ListWorkflows200JSONResponse(response), nil
 }
-

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -63,7 +64,7 @@ func NewCreateWorkflowTool(repo WorkflowRepository) *domain.Tool {
 			name, _ := params["name"].(string)
 			desc, _ := params["description"].(string)
 			projectID, _ := params["project_id"].(string)
-			
+
 			// Resolve Project ID from context if missing
 			if projectID == "" {
 				if pID, found := GetProjectFromContext(ctx); found {
@@ -83,18 +84,18 @@ func NewCreateWorkflowTool(repo WorkflowRepository) *domain.Tool {
 				if !ok {
 					continue
 				}
-				
+
 				id, _ := sMap["id"].(string)
 				prompt, _ := sMap["prompt"].(string)
 				personaID, _ := sMap["persona_id"].(string)
-				
+
 				var dependsOn []string
 				if deps, ok := sMap["depends_on"].([]interface{}); ok {
 					for _, d := range deps {
 						dependsOn = append(dependsOn, fmt.Sprint(d))
 					}
 				}
-				
+
 				var tools []string
 				if ts, ok := sMap["tools"].([]interface{}); ok {
 					for _, t := range ts {
@@ -128,6 +129,35 @@ func NewCreateWorkflowTool(repo WorkflowRepository) *domain.Tool {
 			}
 
 			return fmt.Sprintf("Workflow created with ID: %s", wf.ID), nil
+		},
+	}
+}
+
+func NewListWorkflowsTool(repo WorkflowRepository) *domain.Tool {
+	return &domain.Tool{
+		Name:        "list_workflows",
+		Description: "Lists all workflows. Returns name, status, and step count for each workflow.",
+		Parameters: domain.ToolParameters{
+			Type:       "object",
+			Properties: map[string]interface{}{},
+			Required:   []string{},
+		},
+		ExecutionType: domain.ExecNative,
+		Execute: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			workflows, err := repo.ListWorkflows(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to list workflows: %w", err)
+			}
+
+			if len(workflows) == 0 {
+				return "No workflows found.", nil
+			}
+
+			var lines []string
+			for _, wf := range workflows {
+				lines = append(lines, fmt.Sprintf("- %s (ID: %s) [%s] — %d steps", wf.Name, wf.ID, wf.Status, len(wf.Steps)))
+			}
+			return fmt.Sprintf("%d workflows:\n%s", len(workflows), strings.Join(lines, "\n")), nil
 		},
 	}
 }

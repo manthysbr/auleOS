@@ -23,6 +23,7 @@ type ReActAgentService struct {
 	convs    *ConversationStore
 	repo     personaReader
 	ws       *WorkspaceManager
+	tracer   *TraceCollector
 	maxIters int
 }
 
@@ -40,6 +41,7 @@ func NewReActAgentService(
 	convs *ConversationStore,
 	repo personaReader,
 	ws *WorkspaceManager,
+	tracer *TraceCollector,
 ) *ReActAgentService {
 	return &ReActAgentService{
 		logger:   logger,
@@ -49,6 +51,7 @@ func NewReActAgentService(
 		convs:    convs,
 		repo:     repo,
 		ws:       ws,
+		tracer:   tracer,
 		maxIters: 5,
 	}
 }
@@ -58,6 +61,20 @@ func NewReActAgentService(
 // If personaID is provided, the agent uses the persona's system prompt and tool filter.
 func (s *ReActAgentService) Chat(ctx context.Context, convID domain.ConversationID, message string, personaID *domain.PersonaID) (*domain.AgentResponse, domain.ConversationID, error) {
 	s.logger.Info("starting ReAct loop", "message", message, "conversation_id", string(convID))
+
+	// --- Start Trace ---
+	traceName := "chat: " + message
+	if len(traceName) > 80 {
+		traceName = traceName[:80] + "..."
+	}
+	traceAttrs := map[string]string{"conversation_id": string(convID)}
+	if personaID != nil {
+		traceAttrs["persona_id"] = string(*personaID)
+	}
+	ctx, traceID, _ := s.tracer.StartTrace(ctx, traceName, traceAttrs)
+	defer func() {
+		// EndTrace is called explicitly below — this is a safety net
+	}()
 
 	// Resolve persona
 	var persona *domain.Persona
@@ -70,6 +87,13 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 			s.logger.Warn("persona not found, using default", "persona_id", string(*personaID), "error", err)
 		}
 	}
+
+	s.tracer.SetTraceConversation(traceID, string(convID), func() string {
+		if personaID != nil {
+			return string(*personaID)
+		}
+		return ""
+	}())
 
 	// Auto-create conversation if needed
 	if convID == "" {
@@ -99,20 +123,26 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 		return nil, convID, fmt.Errorf("persist user message: %w", err)
 	}
 
-	// Inject ProjectID into context and read MEMORY.md if available
-	var memoryContent string
+	// Inject ProjectID into context and load workspace context (AGENT.md, USER.md, IDENTITY.md, MEMORY.md, skills)
+	var wsCtx WorkspaceContext
 	if currentConv, err := s.convs.GetConversation(ctx, convID); err == nil && currentConv.ProjectID != nil {
 		projectID := *currentConv.ProjectID
 		ctx = ContextWithProject(ctx, projectID)
 		s.logger.Info("context injected with project_id", "project_id", string(projectID))
 
-		// Try to read MEMORY.md
+		// Load all workspace personality/context files
+		wsCtx = LoadWorkspaceContext(s.ws, string(projectID), s.logger)
+
+		// Load skills summary if skills directory exists
 		if s.ws != nil {
-			memoryPath := filepath.Join(s.ws.GetProjectPath(string(projectID)), "MEMORY.md")
-			if data, err := os.ReadFile(memoryPath); err == nil && len(data) > 0 {
-				memoryContent = string(data)
-				s.logger.Info("memory injected", "bytes", len(data))
-			}
+			projPath := s.ws.GetProjectPath(string(projectID))
+			homeDir, _ := os.UserHomeDir()
+			globalSkills := filepath.Join(homeDir, ".aule", "skills")
+			wsCtx.Skills = NewSkillsLoader(s.logger).BuildSkillsSummary(
+				filepath.Join(projPath, "skills"),
+				globalSkills,
+				"",
+			)
 		}
 	}
 
@@ -123,7 +153,7 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 	}
 
 	conversationHistory := []string{
-		s.buildReActPrompt(history, message, persona, memoryContent),
+		s.buildReActPrompt(history, message, persona, wsCtx),
 	}
 	steps := []domain.ReActStep{}
 
@@ -146,8 +176,17 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 	for i := 0; i < s.maxIters; i++ {
 		s.logger.Info("ReAct iteration", "iteration", i+1)
 
-		// 1. Call LLM (with model override if available)
+		// 1. Call LLM (with model override if available) — traced
 		prompt := strings.Join(conversationHistory, "\n\n")
+
+		llmCtx, llmSpanID := s.tracer.StartSpan(ctx, fmt.Sprintf("llm.generate (iter %d)", i+1), domain.SpanKindLLM, map[string]string{
+			"iteration": fmt.Sprintf("%d", i+1),
+			"model":     modelID,
+		})
+		s.tracer.SetSpanInput(llmSpanID, prompt[max(0, len(prompt)-500):])
+		s.tracer.SetSpanModel(llmSpanID, modelID)
+		_ = llmCtx // llmCtx used for future nested calls
+
 		var response string
 		var err error
 		if s.router != nil && modelID != "" {
@@ -156,8 +195,11 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 			response, err = s.llm.GenerateText(ctx, prompt)
 		}
 		if err != nil {
+			s.tracer.EndSpan(llmSpanID, domain.SpanStatusError, "", err.Error())
+			s.tracer.EndTrace(traceID, domain.SpanStatusError, err.Error())
 			return nil, convID, fmt.Errorf("llm generate: %w", err)
 		}
+		s.tracer.EndSpan(llmSpanID, domain.SpanStatusOK, response[:min(500, len(response))], "")
 
 		s.logger.Info("LLM response", "response", response[:min(200, len(response))])
 
@@ -189,18 +231,28 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 				s.logger.Error("failed to persist assistant message", "error", err)
 			}
 
+			s.tracer.EndTrace(traceID, domain.SpanStatusOK, "")
 			return agentResp, convID, nil
 		}
 
-		// 4. Execute tool
+		// 4. Execute tool — traced
 		s.logger.Info("executing tool", "tool", step.Action, "params", step.ActionInput)
-		result, err := effectiveTools.Execute(ctx, step.Action, step.ActionInput)
+
+		toolCtx, toolSpanID := s.tracer.StartSpan(ctx, fmt.Sprintf("tool.%s", step.Action), domain.SpanKindTool, map[string]string{
+			"tool": step.Action,
+		})
+		inputJSON, _ := json.Marshal(step.ActionInput)
+		s.tracer.SetSpanInput(toolSpanID, string(inputJSON))
+
+		result, err := effectiveTools.Execute(toolCtx, step.Action, step.ActionInput)
 		if err != nil {
 			step.Observation = fmt.Sprintf("Error: %v", err)
+			s.tracer.EndSpan(toolSpanID, domain.SpanStatusError, step.Observation, err.Error())
 		} else {
 			// Format observation
 			resultJSON, _ := json.Marshal(result)
 			step.Observation = string(resultJSON)
+			s.tracer.EndSpan(toolSpanID, domain.SpanStatusOK, step.Observation, "")
 		}
 
 		s.logger.Info("tool executed", "observation", step.Observation[:min(200, len(step.Observation))])
@@ -210,11 +262,12 @@ func (s *ReActAgentService) Chat(ctx context.Context, convID domain.Conversation
 		conversationHistory = append(conversationHistory, fmt.Sprintf("Observation: %s", step.Observation))
 	}
 
+	s.tracer.EndTrace(traceID, domain.SpanStatusError, "max iterations reached")
 	return nil, convID, fmt.Errorf("max iterations (%d) reached without final answer", s.maxIters)
 }
 
 // buildReActPrompt creates the initial prompt with tool descriptions and conversation history
-func (s *ReActAgentService) buildReActPrompt(history string, userMessage string, persona *domain.Persona, memory string) string {
+func (s *ReActAgentService) buildReActPrompt(history string, userMessage string, persona *domain.Persona, wsCtx WorkspaceContext) string {
 	// Choose effective tool set for prompt
 	var toolsDesc string
 	if persona != nil && len(persona.AllowedTools) > 0 {
@@ -223,10 +276,17 @@ func (s *ReActAgentService) buildReActPrompt(history string, userMessage string,
 		toolsDesc = s.tools.FormatToolsForPrompt()
 	}
 
-	// Build system identity from persona or default
+	// Build system identity from persona or workspace IDENTITY.md or default
 	systemIdentity := "You are an AI assistant with access to tools."
 	if persona != nil && persona.SystemPrompt != "" {
 		systemIdentity = persona.SystemPrompt
+	} else if wsCtx.Identity != "" {
+		systemIdentity = wsCtx.Identity
+	}
+
+	// Append AGENT.md instructions if present
+	if wsCtx.Agent != "" {
+		systemIdentity += "\n\n" + wsCtx.Agent
 	}
 
 	var historyBlock string
@@ -238,13 +298,12 @@ Previous conversation:
 `, history)
 	}
 
+	// Build workspace context block (memory, user prefs, skills, tools guide)
+	workspaceBlock := wsCtx.FormatForPrompt()
+	// For backwards compatibility, if wsCtx produced a block it replaces the old memory block
 	var memoryBlock string
-	if memory != "" {
-		memoryBlock = fmt.Sprintf(`
-LONG-TERM MEMORY (Facts/Preferences/Context):
-%s
----
-`, memory)
+	if workspaceBlock != "" {
+		memoryBlock = workspaceBlock
 	}
 
 	return fmt.Sprintf(`%s
@@ -253,7 +312,7 @@ You use the ReAct pattern: Thought → Action → Observation → ... → Final 
 
 FORMAT (tool call):
 Thought: <reasoning>
-Action: <tool_name>
+Action: <EXACT tool name from list below>
 Action Input: <JSON params>
 
 FORMAT (direct answer):
@@ -270,10 +329,13 @@ RULES:
 1. Always start with "Thought:"
 2. For simple chat (greetings, questions, conversation), go DIRECTLY to "Final Answer:" — no tools needed.
 3. Only use tools when the user explicitly asks for something requiring them.
-4. Tools generate_image and generate_text are ASYNC. When "status":"queued", tell user to wait.
-5. When "status":"unavailable", the service is down — tell user clearly.
-6. Action Input must be valid JSON on one line.
-7. CHECK MEMORY: If the user asks about something stored in LONG-TERM MEMORY, use it!
+4. CRITICAL: Use the EXACT tool name from the "Available Tools" list above. Do NOT invent tool names.
+5. Tools generate_image and generate_text are ASYNC. When "status":"queued", tell user to wait.
+6. When "status":"unavailable", the service is down — tell user clearly.
+7. Action Input must be valid JSON on one line.
+8. CHECK MEMORY: If the user asks about something stored in LONG-TERM MEMORY, use it!
+
+EXAMPLES:
 
 Example 1 — simple chat:
 User: Hello!
@@ -285,6 +347,24 @@ User: Generate an image of a sunset
 Thought: I need to use generate_image for this request.
 Action: generate_image
 Action Input: {"prompt": "beautiful sunset over ocean"}
+
+Example 3 — create a workflow:
+User: Create a workflow to analyze and summarize a document
+Thought: I need to use create_workflow to create a multi-step workflow.
+Action: create_workflow
+Action Input: {"name": "Document Analysis", "steps": [{"id": "analyze", "prompt": "Analyze the document structure and key points"}, {"id": "summarize", "prompt": "Write a concise summary based on the analysis", "depends_on": ["analyze"]}]}
+
+Example 4 — run a command:
+User: What is my current directory?
+Thought: I need to use exec to run a shell command.
+Action: exec
+Action Input: {"command": "pwd"}
+
+Example 5 — read a file:
+User: Show me the contents of main.go
+Thought: I need to use read_file to read this file.
+Action: read_file
+Action Input: {"path": "main.go"}
 
 Now respond to:
 User: %s`, systemIdentity, toolsDesc, memoryBlock, historyBlock, userMessage)

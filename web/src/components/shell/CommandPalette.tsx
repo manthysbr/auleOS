@@ -14,7 +14,7 @@ interface Command {
 }
 
 export function CommandPalette() {
-    const { commandPaletteOpen, setCommandPaletteOpen, setActiveView, openProject, setChatPanelOpen } = useUIStore()
+    const { commandPaletteOpen, setCommandPaletteOpen, setActiveView, openProject, setChatWindowOpen } = useUIStore()
     const { projects } = useProjectStore()
     const { conversations, selectConversation } = useConversationStore()
     const [query, setQuery] = useState("")
@@ -28,7 +28,7 @@ export function CommandPalette() {
         { id: "nav-tools", label: "Go to Tools", icon: Wrench, category: "Navigation", action: () => setActiveView("tools") },
         { id: "nav-jobs", label: "Go to Jobs", icon: Activity, category: "Navigation", action: () => setActiveView("jobs") },
         { id: "nav-settings", label: "Go to Settings", icon: Settings, category: "Navigation", action: () => setActiveView("settings") },
-        { id: "toggle-chat", label: "Toggle Chat Panel", icon: MessageSquare, category: "Actions", action: () => setChatPanelOpen(true) },
+        { id: "toggle-chat", label: "Abrir Chat", icon: MessageSquare, category: "Actions", action: () => setChatWindowOpen(true) },
         // Projects
         ...projects.map((p) => ({
             id: `proj-${p.id}`,
@@ -45,7 +45,7 @@ export function CommandPalette() {
             category: "Conversations",
             action: () => {
                 selectConversation(c.id)
-                setChatPanelOpen(true)
+                setChatWindowOpen(true)
             },
         })),
     ]
@@ -79,7 +79,7 @@ export function CommandPalette() {
             }
             if ((e.metaKey || e.ctrlKey) && e.key === "j") {
                 e.preventDefault()
-                useUIStore.getState().toggleChatPanel()
+                useUIStore.getState().toggleChatWindow()
             }
         }
         window.addEventListener("keydown", handleKeyDown)
