@@ -78,7 +78,7 @@ func (m *Manager) Spawn(ctx context.Context, spec domain.WorkerSpec) (domain.Wor
 	}
 
 	// 2. Prepare Configs
-	
+
 	// Convert Env map to slice
 	envSlice := []string{
 		fmt.Sprintf("WATCHDOG_SOCKET_PATH=%s/%s", containerSockDir, watchdogSockName),
@@ -86,6 +86,9 @@ func (m *Manager) Spawn(ctx context.Context, spec domain.WorkerSpec) (domain.Wor
 	}
 	for k, v := range spec.Env {
 		envSlice = append(envSlice, fmt.Sprintf("%s=%s", k, v))
+	}
+	if spec.AgentPrompt != "" {
+		envSlice = append(envSlice, fmt.Sprintf("AULE_AGENT_PROMPT=%s", spec.AgentPrompt))
 	}
 
 	cfg := &container.Config{
@@ -109,7 +112,7 @@ func (m *Manager) Spawn(ctx context.Context, spec domain.WorkerSpec) (domain.Wor
 		fmt.Sprintf("%s:/workspace", workspaceDir), // Fixed variable name from wsPath to workspaceDir
 		fmt.Sprintf("%s:%s", socketDir, containerSockDir),
 	}
-	
+
 	// 2. Custom Bind Mounts from Spec
 	for hostPath, containerPath := range spec.BindMounts {
 		binds = append(binds, fmt.Sprintf("%s:%s:ro", hostPath, containerPath)) // Default to ReadOnly for safety
@@ -118,12 +121,12 @@ func (m *Manager) Spawn(ctx context.Context, spec domain.WorkerSpec) (domain.Wor
 	hostCfg := &container.HostConfig{
 		NetworkMode: "none", // STRICT SECURITY RULE
 		Binds:       binds,
-		Resources: container.Resources{
+		Resources:   container.Resources{
 			// TODO: Add CPU/Mem limit logic based on Spec
 			// NanoCPUs: int64(spec.ResourceCPU * 1e9),
 			// Memory:   spec.ResourceMem,
 		},
-		ReadonlyRootfs: true, // STRICT SECURITY RULE
+		ReadonlyRootfs: spec.ReadonlyRootfs, // default false — set true only for hardened workers
 		Tmpfs: map[string]string{
 			"/tmp": "rw,noexec,nosuid,size=64m", // Allow writable /tmp
 		},
@@ -134,7 +137,7 @@ func (m *Manager) Spawn(ctx context.Context, spec domain.WorkerSpec) (domain.Wor
 	// 3. Create Container
 	// We might need to pull image first if not present, but for now assuming it exists or implicit pull
 	// (Client.ContainerCreate doesn't auto-pull, usually. But let's assume images are pre-pulled for M1)
-	
+
 	resp, err := m.cli.ContainerCreate(ctx, cfg, hostCfg, netCfg, nil, "aule-worker-"+string(id))
 	if client.IsErrNotFound(err) {
 		// Try to pull
@@ -148,7 +151,7 @@ func (m *Manager) Spawn(ctx context.Context, spec domain.WorkerSpec) (domain.Wor
 		// Retry create
 		resp, err = m.cli.ContainerCreate(ctx, cfg, hostCfg, netCfg, nil, "aule-worker-"+string(id))
 	}
-	
+
 	if err != nil {
 		m.cleanup(socketDir, workspaceDir)
 		return "", fmt.Errorf("failed to create container: %w", err)
@@ -192,7 +195,7 @@ func (m *Manager) HealthCheck(ctx context.Context, id domain.WorkerID) (domain.H
 
 	// 2. Ping Watchdog via Unix Socket
 	socketPath := filepath.Join(m.baseSocketDir, string(id), watchdogSockName)
-	
+
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -206,7 +209,7 @@ func (m *Manager) HealthCheck(ctx context.Context, id domain.WorkerID) (domain.H
 	if err != nil {
 		// Container running but watchdog cannot be reached?
 		// Maybe it's still starting up.
-		return domain.HealthStatusStarting, nil 
+		return domain.HealthStatusStarting, nil
 	}
 	defer resp.Body.Close()
 
@@ -219,7 +222,7 @@ func (m *Manager) HealthCheck(ctx context.Context, id domain.WorkerID) (domain.H
 
 func (m *Manager) Kill(ctx context.Context, id domain.WorkerID) error {
 	cID := "aule-worker-" + string(id)
-	
+
 	// Force remove container (Stop + Remove)
 	err := m.cli.ContainerRemove(ctx, cID, container.RemoveOptions{Force: true})
 	if err != nil && !client.IsErrNotFound(err) {
@@ -254,7 +257,7 @@ func (m *Manager) List(ctx context.Context) ([]domain.Worker, error) {
 		if idStr == "" {
 			continue
 		}
-		
+
 		status := domain.HealthStatusUnknown
 		switch c.State {
 		case "running":
@@ -284,11 +287,11 @@ func (m *Manager) GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadClose
 		Follow:     true,
 		Timestamps: false,
 	}
-	
+
 	return m.cli.ContainerLogs(ctx, cID, opts)
 }
 
-// Helper to construct list filters 
+// Helper to construct list filters
 func makeFilters(m map[string]string) filters.Args {
 	args := filters.NewArgs()
 	for k, v := range m {

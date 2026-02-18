@@ -32,6 +32,7 @@ type Server struct {
 	workflowExec *services.WorkflowExecutor
 	tracer       *services.TraceCollector
 	toolRegistry *domain.ToolRegistry
+	systemChat   *services.SystemChat // optional proactive notification channel
 	workerMgr    interface {
 		GetLogs(ctx context.Context, id domain.WorkerID) (io.ReadCloser, error)
 	}
@@ -140,6 +141,11 @@ func NewServer(
 	}
 }
 
+// SetSystemChat wires the proactive kernel notification channel.
+func (s *Server) SetSystemChat(sc *services.SystemChat) {
+	s.systemChat = sc
+}
+
 // Handler returns the http.Handler for the server.
 // Mounts generated API routes + custom settings routes on a shared mux.
 func (s *Server) Handler() http.Handler {
@@ -210,6 +216,11 @@ func (s *Server) Handler() http.Handler {
 		}
 		if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/v1/tools/") && strings.HasSuffix(r.URL.Path, "/run") {
 			s.handleRunTool(w, r)
+			return
+		}
+		// System inbox — kernel proactive notification channel
+		if r.Method == "GET" && r.URL.Path == "/v1/system/inbox" {
+			s.handleKernelInbox(w, r)
 			return
 		}
 		mux.ServeHTTP(w, r)
@@ -997,4 +1008,21 @@ func (s *Server) handleRunTool(w http.ResponseWriter, r *http.Request) {
 		"result":      result,
 		"duration_ms": elapsed,
 	})
+}
+
+// handleKernelInbox returns the system inbox status (conversation ID + unread badge).
+// GET /v1/system/inbox
+func (s *Server) handleKernelInbox(w http.ResponseWriter, r *http.Request) {
+	if s.systemChat == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"conversation_id": string(domain.SystemConversationID),
+			"unread_count":    0,
+			"last_message":    nil,
+		})
+		return
+	}
+	status := s.systemChat.GetStatus(r.Context())
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
 }

@@ -1,20 +1,37 @@
 import { useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { GlassPanel } from "@/components/ui/glass-panel"
-import { Plus, Settings, Loader2, MessageSquare, Trash2 } from "lucide-react"
+import { Plus, Settings, Loader2, MessageSquare, Trash2, Bot } from "lucide-react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useConversationStore } from "@/store/conversations"
 
+const KERNEL_CONV_ID = "conv-kernel-system"
+
 interface SidebarProps {
     currentJobId?: string | null
     onSelectJob?: (id: string) => void
     onOpenSettings?: () => void
+    onOpenKernel?: () => void
+    kernelActive?: boolean
 }
 
-export function Sidebar({ currentJobId, onSelectJob, onOpenSettings }: SidebarProps) {
+export function Sidebar({ currentJobId, onSelectJob, onOpenSettings, onOpenKernel, kernelActive }: SidebarProps) {
     const queryClient = useQueryClient()
+
+    // Kernel inbox unread badge
+    const { data: inboxStatus } = useQuery({
+        queryKey: ["kernel-inbox"],
+        queryFn: async () => {
+            const res = await fetch("http://localhost:8080/v1/system/inbox")
+            if (!res.ok) return { unread_count: 0, conversation_id: KERNEL_CONV_ID }
+            return res.json() as Promise<{ unread_count: number; conversation_id: string }>
+        },
+        refetchInterval: 10000,
+    })
+
+    const unreadCount = inboxStatus?.unread_count ?? 0
 
     const {
         conversations,
@@ -75,6 +92,30 @@ export function Sidebar({ currentJobId, onSelectJob, onOpenSettings }: SidebarPr
 
     return (
         <GlassPanel className="h-full flex flex-col gap-2 p-4 rounded-2xl" intensity="md">
+            {/* Kernel Inbox — pinned at top */}
+            <button
+                onClick={onOpenKernel}
+                className={cn(
+                    "flex items-center gap-2.5 w-full rounded-xl px-3 py-2.5 text-sm transition-colors border",
+                    kernelActive
+                        ? "bg-violet-500/10 text-violet-700 border-violet-300/40"
+                        : "hover:bg-accent border-border/40 text-foreground/80"
+                )}
+            >
+                <div className="relative w-7 h-7 rounded-full bg-violet-100 border border-violet-200/60 flex items-center justify-center flex-shrink-0">
+                    <Bot className="w-3.5 h-3.5 text-violet-600" />
+                    {unreadCount > 0 && (
+                        <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-violet-500 text-[9px] text-white flex items-center justify-center font-bold">
+                            {unreadCount > 9 ? "9+" : unreadCount}
+                        </span>
+                    )}
+                </div>
+                <span className="font-medium">Kernel</span>
+                {unreadCount > 0 && (
+                    <span className="ml-auto text-[10px] text-violet-600 font-semibold">{unreadCount} new</span>
+                )}
+            </button>
+
             {/* Conversations Section */}
             <div className="flex items-center justify-between px-2">
                 <h2 className="text-sm font-semibold tracking-tight flex items-center gap-2">

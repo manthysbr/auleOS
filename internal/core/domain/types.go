@@ -22,13 +22,15 @@ const (
 
 // WorkerSpec defines how a worker should be spawned
 type WorkerSpec struct {
-	Image       string            `json:"image"`
-	Command     []string          `json:"command"`
-	Env         map[string]string `json:"env"`
-	ResourceCPU float64           `json:"resource_cpu"` // 0.5 = 50% core
-	ResourceMem int64             `json:"resource_mem"` // in bytes
-	Tags        map[string]string `json:"tags"`
-	BindMounts  map[string]string `json:"bind_mounts"` // HostPath -> ContainerPath
+	Image          string            `json:"image"`
+	Command        []string          `json:"command"`
+	Env            map[string]string `json:"env"`
+	ResourceCPU    float64           `json:"resource_cpu"` // 0.5 = 50% core
+	ResourceMem    int64             `json:"resource_mem"` // in bytes
+	Tags           map[string]string `json:"tags"`
+	BindMounts     map[string]string `json:"bind_mounts"`               // HostPath -> ContainerPath
+	AgentPrompt    string            `json:"agent_prompt,omitempty"`    // if set, passed as AULE_AGENT_PROMPT env var
+	ReadonlyRootfs bool              `json:"readonly_rootfs,omitempty"` // default false for compatibility
 }
 
 // Worker represents a running instance

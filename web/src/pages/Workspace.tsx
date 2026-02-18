@@ -2,6 +2,7 @@ import { Sidebar } from "@/components/workspace/Sidebar"
 import { AgentStream } from "@/components/workspace/AgentStream"
 import { ChatInterface } from "@/components/agent/ChatInterface"
 import { SettingsPanel } from "@/components/workspace/SettingsPanel"
+import { KernelInbox } from "@/components/workspace/KernelInbox"
 import { useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
@@ -10,7 +11,7 @@ const queryClient = new QueryClient()
 
 export default function Workspace() {
     const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-    const [viewMode, setViewMode] = useState<"chat" | "job" | "settings">("chat")
+    const [viewMode, setViewMode] = useState<"chat" | "job" | "settings" | "kernel">("chat")
 
     const handleSelectJob = (id: string) => {
         setSelectedJobId(id)
@@ -19,6 +20,10 @@ export default function Workspace() {
 
     const handleOpenSettings = () => {
         setViewMode("settings")
+    }
+
+    const handleOpenKernel = () => {
+        setViewMode("kernel")
     }
 
     return (
@@ -30,15 +35,17 @@ export default function Workspace() {
                         currentJobId={selectedJobId}
                         onSelectJob={handleSelectJob}
                         onOpenSettings={handleOpenSettings}
+                        onOpenKernel={handleOpenKernel}
+                        kernelActive={viewMode === "kernel"}
                     />
                 </aside>
 
                 {/* Right Agent Panel (Flex Grow) */}
                 <main className="flex-1 min-w-0 flex flex-col gap-4">
-                    {/* Top Bar / Navigation could go here */}
-
                     {viewMode === "settings" ? (
                         <SettingsPanel onClose={() => setViewMode(selectedJobId ? "job" : "chat")} />
+                    ) : viewMode === "kernel" ? (
+                        <KernelInbox onClose={() => setViewMode("chat")} />
                     ) : selectedJobId && viewMode === "job" ? (
                         <div className="h-full relative">
                             <button

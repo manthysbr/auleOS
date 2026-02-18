@@ -156,6 +156,10 @@ func run(logger *slog.Logger) error {
 	// Wire conversation store into lifecycle for async job → chat notifications
 	lifecycle.SetConversationStore(convStore)
 
+	// SystemChat — proactive kernel notification channel (Kernel inbox in UI)
+	systemChat := services.NewSystemChat(logger, convStore, eventBus, llmProvider)
+	lifecycle.SetSystemChat(systemChat)
+
 	// Model Router - resolves which model to use per persona/role
 	modelRouter := services.NewModelRouter(logger, llmProvider)
 
@@ -311,6 +315,10 @@ func run(logger *slog.Logger) error {
 
 	// Initialize Kernel API Server
 	apiServer := kernel.NewServer(logger, lifecycle, reactAgent, eventBus, settingsStore, convStore, modelRouter, discovery, capRouter, wasmRT, workflowExec, traceCollector, toolRegistry, workerMgr, repo)
+	apiServer.SetSystemChat(systemChat)
+
+	// Post welcome message into kernel inbox on first boot (idempotent)
+	go systemChat.WelcomeIfNew(context.Background())
 
 	// CronScheduler — executes scheduled tasks (M11)
 	cronScheduler := services.NewCronScheduler(logger, repo, reactAgent, eventBus)

@@ -181,6 +181,34 @@ func (s *ConversationStore) BuildContextWindow(ctx context.Context, convID domai
 	return sb.String(), nil
 }
 
+// EnsureConversation creates a conversation with a specific fixed ID if it does not exist yet.
+// Idempotent — safe to call multiple times.
+func (s *ConversationStore) EnsureConversation(ctx context.Context, id domain.ConversationID, title string) error {
+	_, err := s.repo.GetConversation(ctx, id)
+	if err == nil {
+		return nil // already exists
+	}
+	if err != domain.ErrConversationNotFound {
+		return err
+	}
+	now := time.Now()
+	conv := domain.Conversation{
+		ID:        id,
+		Title:     title,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if createErr := s.repo.CreateConversation(ctx, conv); createErr != nil {
+		return createErr
+	}
+	s.mu.Lock()
+	s.cache[id] = nil
+	s.touchLocked(id)
+	s.evictLocked()
+	s.mu.Unlock()
+	return nil
+}
+
 // --- LRU helpers (must be called with mu held) ---
 
 func (s *ConversationStore) touchLocked(id domain.ConversationID) {

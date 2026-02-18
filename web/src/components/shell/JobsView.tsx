@@ -56,6 +56,7 @@ export function JobsView() {
     const [showForm, setShowForm] = useState(false)
     const [formImage, setFormImage] = useState("")
     const [formCommand, setFormCommand] = useState("")
+    const [formAgentPrompt, setFormAgentPrompt] = useState("")
     const [submitResult, setSubmitResult] = useState<{ id?: string; error?: string } | null>(null)
     const queryClient = useQueryClient()
 
@@ -64,8 +65,16 @@ export function JobsView() {
             const cmd = formCommand.trim()
                 ? formCommand.trim().match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [formCommand.trim()]
                 : []
+            const env: Record<string, string> = {}
+            if (formAgentPrompt.trim()) {
+                env["AULE_AGENT_PROMPT"] = formAgentPrompt.trim()
+            }
             const { data, error } = await api.POST("/v1/jobs", {
-                body: { image: formImage.trim(), command: cmd },
+                body: {
+                    image: formImage.trim(),
+                    command: cmd,
+                    ...(Object.keys(env).length > 0 ? { env } : {}),
+                },
             })
             if (error) throw new Error(JSON.stringify(error))
             return data
@@ -74,6 +83,7 @@ export function JobsView() {
             setSubmitResult({ id: (data as any)?.id ?? "submitted" })
             setFormImage("")
             setFormCommand("")
+            setFormAgentPrompt("")
             queryClient.invalidateQueries({ queryKey: ["jobs"] })
         },
         onError: (err: Error) => {
@@ -133,6 +143,18 @@ export function JobsView() {
                             onChange={e => setFormCommand(e.target.value)}
                             className="w-full px-3 py-1.5 text-sm rounded-lg bg-background border border-border/60 focus:outline-none focus:border-primary/60 font-mono"
                             onKeyDown={e => { if (e.key === "Enter" && formImage.trim()) submitMutation.mutate() }}
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-xs text-muted-foreground">
+                            Agent Prompt <span className="opacity-60">(opcional — instrução para o container via AULE_AGENT_PROMPT)</span>
+                        </label>
+                        <textarea
+                            rows={2}
+                            placeholder="e.g. Analise os arquivos em /workspace e gere um relatório em /workspace/report.md"
+                            value={formAgentPrompt}
+                            onChange={e => setFormAgentPrompt(e.target.value)}
+                            className="w-full px-3 py-1.5 text-sm rounded-lg bg-background border border-border/60 focus:outline-none focus:border-primary/60 resize-none"
                         />
                     </div>
                     <button

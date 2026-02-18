@@ -22,7 +22,11 @@ const (
 	RoleAssistant MessageRole = "assistant"
 	RoleSystem    MessageRole = "system"
 	RoleTool      MessageRole = "tool"
+	RoleKernel    MessageRole = "kernel" // system-initiated proactive messages
 )
+
+// SystemConversationID is the fixed ID for the kernel's proactive chat with the user
+const SystemConversationID ConversationID = "conv-kernel-system"
 
 // Conversation represents a multi-turn chat session
 type Conversation struct {

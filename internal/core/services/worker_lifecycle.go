@@ -27,16 +27,17 @@ const (
 type capabilityJobHandler func(context.Context, domain.Job)
 
 type WorkerLifecycle struct {
-	logger    *slog.Logger
-	scheduler *JobScheduler
-	workerMgr ports.WorkerManager
-	repo      ports.Repository
-	workspace *WorkspaceManager
-	eventBus  *EventBus
-	llm       domain.LLMProvider
-	image     domain.ImageProvider
-	convStore *ConversationStore // optional: enables async job → chat push
-	publicURL string
+	logger     *slog.Logger
+	scheduler  *JobScheduler
+	workerMgr  ports.WorkerManager
+	repo       ports.Repository
+	workspace  *WorkspaceManager
+	eventBus   *EventBus
+	llm        domain.LLMProvider
+	image      domain.ImageProvider
+	convStore  *ConversationStore // optional: enables async job → chat push
+	systemChat *SystemChat        // optional: enables kernel proactive notifications
+	publicURL  string
 
 	handlerMu          sync.RWMutex
 	capabilityHandlers map[string]capabilityJobHandler
@@ -255,6 +256,11 @@ func (s *WorkerLifecycle) executeJob(ctx context.Context, job domain.Job) {
 				if err := s.repo.SaveJob(ctx, job); err != nil {
 					s.logger.Error("failed to save job status", "error", err)
 				}
+
+				// Notify kernel inbox about container job completion
+				if s.systemChat != nil {
+					s.systemChat.NotifyJobResult(ctx, string(job.ID), "COMPLETED", "")
+				}
 				return
 			}
 		}
@@ -443,6 +449,11 @@ func (s *WorkerLifecycle) failJob(ctx context.Context, job domain.Job, err error
 
 	// Notify conversation about the failure too
 	s.notifyConversation(ctx, job, fmt.Sprintf("Job failed: %s", msg), nil)
+
+	// Notify kernel inbox
+	if s.systemChat != nil {
+		s.systemChat.NotifyJobResult(ctx, string(job.ID), "FAILED", msg)
+	}
 }
 
 // notifyConversation pushes a result message back into the originating conversation
@@ -664,6 +675,11 @@ func (wl *WorkerLifecycle) UpdateProviders(llm domain.LLMProvider, img domain.Im
 // can push result messages back into the originating chat.
 func (wl *WorkerLifecycle) SetConversationStore(cs *ConversationStore) {
 	wl.convStore = cs
+}
+
+// SetSystemChat wires the SystemChat so the lifecycle can post proactive notifications.
+func (wl *WorkerLifecycle) SetSystemChat(sc *SystemChat) {
+	wl.systemChat = sc
 }
 
 // TestLLM sends a minimal request to verify LLM connectivity.
