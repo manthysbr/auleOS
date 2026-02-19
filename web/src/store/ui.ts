@@ -1,6 +1,6 @@
 import { create } from "zustand"
 
-type ActiveView = "dashboard" | "project" | "agents" | "tools" | "workflows" | "jobs" | "traces" | "settings"
+type ActiveView = "dashboard" | "project" | "agents" | "tools" | "workflows" | "jobs" | "traces" | "tasks" | "workers" | "kernel" | "settings"
 
 interface UIState {
     activeView: ActiveView

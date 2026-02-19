@@ -23,3 +23,5 @@ go.sum
 *db.wal*
 *db.*
 MILESTONES.md
+web/package-lock.json
+web/package.json

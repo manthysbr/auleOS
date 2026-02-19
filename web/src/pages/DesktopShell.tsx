@@ -14,6 +14,7 @@ import { TracesView } from "@/components/shell/TracesView"
 import { ScheduledTasksView } from "@/components/shell/ScheduledTasksView"
 import { WorkersView } from "@/components/shell/WorkersView"
 import { SettingsPanel } from "@/components/workspace/SettingsPanel"
+import { KernelInbox } from "@/components/workspace/KernelInbox"
 import { useUIStore } from "@/store/ui"
 
 const queryClient = new QueryClient()
@@ -40,6 +41,8 @@ function CenterStage() {
             return <ScheduledTasksView />
         case "workers":
             return <WorkersView />
+        case "kernel":
+            return <KernelInbox />
         case "settings":
             return <SettingsPanel onClose={() => useUIStore.getState().setActiveView("dashboard")} />
         default:

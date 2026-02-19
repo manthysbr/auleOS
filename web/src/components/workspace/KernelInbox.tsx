@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from "react"
-import { Bot, Send, Loader2, CheckCircle, XCircle, Lightbulb, HelpCircle, Info, X } from "lucide-react"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { Bot, Send, Loader2, CheckCircle2, XCircle, Bell, ChevronDown, ChevronRight, Inbox, MessageSquare, Lightbulb, HelpCircle } from "lucide-react"
+import ReactMarkdown from "react-markdown"
 import { cn } from "@/lib/utils"
 
 const KERNEL_CONV_ID = "conv-kernel-system"
@@ -13,214 +14,336 @@ interface KernelMessage {
     metadata?: Record<string, unknown>
 }
 
-function getKindIcon(kind?: string) {
-    switch (kind) {
-        case "job_result": return null   // icon from content emoji
-        case "suggestion": return <Lightbulb className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
-        case "question":   return <HelpCircle className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
-        case "welcome":    return <Bot className="w-3.5 h-3.5 text-violet-500 flex-shrink-0 mt-0.5" />
-        default:           return <Info className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0 mt-0.5" />
-    }
+type MsgKind = "job_completed" | "job_failed" | "suggestion" | "question" | "welcome" | "info" | "user"
+
+function detectKind(msg: KernelMessage): MsgKind {
+    if (msg.role === "user") return "user"
+    const k = msg.metadata?.kind as string | undefined
+    if (k === "job_result") return msg.content.includes("COMPLETED") ? "job_completed" : "job_failed"
+    if (k === "suggestion") return "suggestion"
+    if (k === "question") return "question"
+    if (k === "welcome") return "welcome"
+    return "info"
 }
 
-function KernelBubble({ msg }: { msg: KernelMessage }) {
-    const kind = msg.metadata?.kind as string | undefined
-    const isUser = msg.role === "user"
+// System kinds go to Inbox tab; conversational kinds go to Chat tab
+const SYSTEM_KINDS: MsgKind[] = ["job_completed", "job_failed", "info"]
+const CHAT_KINDS: MsgKind[] = ["welcome", "suggestion", "question", "user"]
+
+const INBOX_META: Record<string, { icon: React.ReactNode; accent: string }> = {
+    job_completed: { icon: <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />, accent: "border-l-emerald-400/50" },
+    job_failed:    { icon: <XCircle className="w-3.5 h-3.5 text-red-500" />,          accent: "border-l-red-400/50" },
+    info:          { icon: <Bell className="w-3.5 h-3.5 text-muted-foreground/60" />, accent: "border-l-border/60" },
+}
+
+function excerpt(text: string, max = 72) {
+    const first = text.split("\n").find(l => l.trim()) ?? text
+    const clean = first.replace(/[*_`#>]/g, "").trim()
+    return clean.length > max ? clean.slice(0, max) + "…" : clean
+}
+
+function fmtTime(iso: string) {
+    const d = new Date(iso)
+    const sameDay = d.toDateString() === new Date().toDateString()
+    return sameDay
+        ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        : d.toLocaleDateString([], { day: "2-digit", month: "short" })
+}
+
+function MD({ content }: { content: string }) {
+    return (
+        <ReactMarkdown components={{
+            p:          ({ children }) => <p className="mb-1 last:mb-0 leading-relaxed">{children}</p>,
+            code:       ({ children }) => <code className="font-mono text-[10px] bg-muted/60 rounded px-1">{children}</code>,
+            pre:        ({ children }) => <pre className="font-mono text-[10px] bg-muted/60 rounded p-2 overflow-x-auto my-1">{children}</pre>,
+            ul:         ({ children }) => <ul className="list-disc list-inside mb-1 space-y-0.5">{children}</ul>,
+            ol:         ({ children }) => <ol className="list-decimal list-inside mb-1 space-y-0.5">{children}</ol>,
+            li:         ({ children }) => <li>{children}</li>,
+            strong:     ({ children }) => <strong className="font-semibold">{children}</strong>,
+            em:         ({ children }) => <em className="italic opacity-80">{children}</em>,
+            blockquote: ({ children }) => <blockquote className="border-l-2 border-border pl-2 opacity-70 italic my-1">{children}</blockquote>,
+        }}>
+            {content}
+        </ReactMarkdown>
+    )
+}
+
+// ─── Inbox tab: accordion rows ────────────────────────────────────────────────
+
+function MailRow({ msg, expanded, onToggle, unread }: {
+    msg: KernelMessage; expanded: boolean; onToggle: () => void; unread: boolean
+}) {
+    const kind = detectKind(msg)
+    const meta = INBOX_META[kind] ?? INBOX_META.info
+
+    return (
+        <div
+            className={cn(
+                "group border-l-2 transition-colors cursor-pointer select-none",
+                expanded ? "bg-muted/30 border-l-violet-400/70" : `${meta.accent} hover:bg-muted/10`,
+            )}
+            onClick={onToggle}
+        >
+            <div className="flex items-center gap-2 px-3 py-1.5">
+                <span className="flex-shrink-0 w-4 flex justify-center">{meta.icon}</span>
+                <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                    {unread && <span className="w-1.5 h-1.5 rounded-full bg-violet-500 flex-shrink-0" />}
+                    <span className={cn("text-xs truncate", unread ? "font-medium text-foreground" : "text-muted-foreground")}>
+                        {excerpt(msg.content)}
+                    </span>
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                    <span className="text-[10px] text-muted-foreground/50 tabular-nums">{fmtTime(msg.created_at)}</span>
+                    {expanded
+                        ? <ChevronDown className="w-3 h-3 text-muted-foreground/40" />
+                        : <ChevronRight className="w-3 h-3 text-muted-foreground/20 group-hover:text-muted-foreground/50 transition-colors" />}
+                </div>
+            </div>
+            {expanded && (
+                <div className="px-4 pb-2.5 pt-0.5 text-xs text-foreground/75 border-t border-border/20">
+                    <MD content={msg.content} />
+                </div>
+            )}
+        </div>
+    )
+}
+
+// ─── Chat tab: compact message list ───────────────────────────────────────────
+
+const CHAT_ICON: Record<string, React.ReactNode> = {
+    suggestion: <Lightbulb className="w-3 h-3 text-amber-400" />,
+    question:   <HelpCircle className="w-3 h-3 text-sky-400" />,
+    welcome:    <Bot className="w-3 h-3 text-violet-500" />,
+}
+
+function ChatLine({ msg }: { msg: KernelMessage }) {
+    const kind = detectKind(msg)
+    const isUser = kind === "user"
 
     if (isUser) {
         return (
-            <div className="flex justify-end">
-                <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2.5 text-sm">
+            <div className="flex justify-end px-3 py-1">
+                <span className="max-w-[75%] text-xs bg-primary/10 text-foreground rounded-xl rounded-br-sm px-3 py-1.5 leading-relaxed">
                     {msg.content}
-                </div>
+                </span>
             </div>
         )
     }
 
     return (
-        <div className="flex gap-2.5 items-start">
-            <div className="w-7 h-7 rounded-full bg-violet-100 border border-violet-200/60 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <Bot className="w-3.5 h-3.5 text-violet-600" />
-            </div>
+        <div className="flex items-start gap-2 px-3 py-1">
+            <span className="mt-0.5 flex-shrink-0 w-4 flex justify-center">
+                {CHAT_ICON[kind] ?? <Bot className="w-3 h-3 text-violet-400" />}
+            </span>
             <div className="flex-1 min-w-0">
-                <div className="flex items-start gap-1.5 rounded-2xl rounded-bl-sm bg-card/80 border border-border/50 px-4 py-2.5">
-                    {getKindIcon(kind)}
-                    <p className="text-sm text-foreground/90 whitespace-pre-wrap">{msg.content}</p>
+                <div className="text-xs text-foreground/85 leading-relaxed">
+                    <MD content={msg.content} />
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-1 ml-1">
-                    {new Date(msg.created_at).toLocaleTimeString()}
-                </p>
+                <span className="text-[10px] text-muted-foreground/40 tabular-nums">{fmtTime(msg.created_at)}</span>
             </div>
         </div>
     )
 }
 
-interface KernelInboxProps {
-    onClose?: () => void
-}
+// ─── Main component ────────────────────────────────────────────────────────────
 
-export function KernelInbox({ onClose }: KernelInboxProps) {
+export function KernelInbox() {
     const [messages, setMessages] = useState<KernelMessage[]>([])
     const [loading, setLoading] = useState(true)
+    const [tab, setTab] = useState<"inbox" | "chat">("chat")
+    const [expandedId, setExpandedId] = useState<string | null>(null)
+    const [readIds, setReadIds] = useState<Set<string>>(new Set())
     const [input, setInput] = useState("")
     const [sending, setSending] = useState(false)
-    const bottomRef = useRef<HTMLDivElement>(null)
+    const [thinking, setThinking] = useState(false)
+    const chatBottomRef = useRef<HTMLDivElement>(null)
 
-    // Load existing messages
     const loadMessages = useCallback(async () => {
         try {
-            const res = await fetch(`${API_BASE}/v1/conversations/${KERNEL_CONV_ID}/messages?limit=100`)
+            const res = await fetch(`${API_BASE}/v1/conversations/${KERNEL_CONV_ID}/messages?limit=200`)
             if (res.ok) {
                 const data = await res.json()
-                if (Array.isArray(data)) {
-                    setMessages(data)
-                }
+                if (Array.isArray(data)) setMessages(data)
             }
         } catch { /* no-op */ }
         setLoading(false)
     }, [])
 
-    useEffect(() => {
-        loadMessages()
-    }, [loadMessages])
+    useEffect(() => { loadMessages() }, [loadMessages])
 
-    // SSE for real-time kernel messages
     useEffect(() => {
         const es = new EventSource(`${API_BASE}/v1/conversations/${KERNEL_CONV_ID}/events`)
-
-        es.addEventListener("kernel_message", (e: MessageEvent) => {
-            try {
-                const data = JSON.parse(e.data)
-                const msg: KernelMessage = {
-                    id: data.message_id ?? `live-${Date.now()}`,
-                    role: "kernel",
-                    content: data.content,
-                    created_at: new Date().toISOString(),
-                    metadata: data.metadata,
-                }
-                setMessages(prev => {
-                    // Avoid duplicates (may arrive via both SSE and loadMessages)
-                    if (prev.some(m => m.id === msg.id)) return prev
-                    return [...prev, msg]
-                })
-            } catch { /* no-op */ }
-        })
-
-        // Agent replies
-        es.addEventListener("agent_message", (e: MessageEvent) => {
-            try {
-                const data = JSON.parse(e.data)
-                if (!data.content) return
-                const msg: KernelMessage = {
-                    id: data.id ?? `live-${Date.now()}`,
-                    role: "assistant",
-                    content: data.content,
-                    created_at: data.created_at ?? new Date().toISOString(),
-                }
-                setMessages(prev => {
-                    if (prev.some(m => m.id === msg.id)) return prev
-                    return [...prev, msg]
-                })
-            } catch { /* no-op */ }
-        })
-
+        const push = (data: unknown, role: KernelMessage["role"]) => {
+            const d = data as Record<string, unknown>
+            const msg: KernelMessage = {
+                id: (d.message_id ?? d.id ?? `live-${Date.now()}`) as string,
+                role,
+                content: d.content as string,
+                created_at: (d.created_at as string | undefined) ?? new Date().toISOString(),
+                metadata: d.metadata as Record<string, unknown> | undefined,
+            }
+            setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
+        }
+        es.addEventListener("kernel_message", (e: MessageEvent) => { try { push(JSON.parse(e.data), "kernel") } catch { /* no-op */ } })
+        es.addEventListener("agent_message",  (e: MessageEvent) => { try { push(JSON.parse(e.data), "assistant") } catch { /* no-op */ } })
         return () => es.close()
     }, [])
 
-    // Auto-scroll on new messages
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-    }, [messages])
+        if (tab === "chat") chatBottomRef.current?.scrollIntoView({ behavior: "smooth" })
+    }, [messages, tab])
+
+    const inboxMsgs = messages.filter(m => SYSTEM_KINDS.includes(detectKind(m)))
+    const chatMsgs  = messages.filter(m => CHAT_KINDS.includes(detectKind(m)))
+
+    const inboxUnread = inboxMsgs.filter(m => !readIds.has(m.id)).length
+    const chatUnread  = chatMsgs.filter(m => m.role !== "user" && !readIds.has(m.id)).length
+
+    const markRead = (id: string) => setReadIds(prev => new Set([...prev, id]))
 
     const handleSend = async () => {
         const text = input.trim()
         if (!text || sending) return
-
-        const userMsg: KernelMessage = {
-            id: `local-${Date.now()}`,
-            role: "user",
-            content: text,
-            created_at: new Date().toISOString(),
-        }
-        setMessages(prev => [...prev, userMsg])
+        const local: KernelMessage = { id: `local-${Date.now()}`, role: "user", content: text, created_at: new Date().toISOString() }
+        setMessages(prev => [...prev, local])
         setInput("")
         setSending(true)
-
+        setThinking(true)
         try {
-            await fetch(`${API_BASE}/v1/chat`, {
+            const res = await fetch(`${API_BASE}/v1/agent/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ message: text, conversation_id: KERNEL_CONV_ID }),
             })
-        } catch { /* no-op */ } finally {
-            setSending(false)
-        }
+            if (res.ok) {
+                const data = await res.json() as { response?: string; conversation_id?: string }
+                if (data.response) {
+                    const agentMsg: KernelMessage = {
+                        id: `agent-${Date.now()}`,
+                        role: "assistant",
+                        content: data.response,
+                        created_at: new Date().toISOString(),
+                        metadata: { kind: "question" },
+                    }
+                    setMessages(prev => [...prev, agentMsg])
+                }
+            }
+        } catch { /* no-op */ } finally { setSending(false); setThinking(false) }
     }
 
-    const isEmpty = !loading && messages.length === 0
-
     return (
-        <div className="h-full flex flex-col rounded-2xl overflow-hidden bg-background/95 border border-border/60 shadow-2xl">
-            {/* Header */}
-            <div className="flex items-center gap-3 px-5 py-4 border-b border-border/50 bg-card/60">
-                <div className="w-8 h-8 rounded-full bg-violet-100 border border-violet-200/60 flex items-center justify-center">
-                    <Bot className="w-4 h-4 text-violet-600" />
-                </div>
-                <div className="flex-1">
-                    <p className="text-sm font-semibold">Kernel</p>
-                    <p className="text-[11px] text-muted-foreground">Sistema · Notificações e sugestões</p>
-                </div>
-                {onClose && (
-                    <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-accent transition-colors">
-                        <X className="w-4 h-4 text-muted-foreground" />
-                    </button>
-                )}
+        <div className="h-full flex flex-col max-w-lg mx-auto">
+            {/* Tab bar */}
+            <div className="flex items-center gap-0 border-b border-border/50 px-2 pt-1">
+                <button
+                    onClick={() => setTab("chat")}
+                    className={cn(
+                        "flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors",
+                        tab === "chat"
+                            ? "border-violet-500 text-foreground"
+                            : "border-transparent text-muted-foreground hover:text-foreground",
+                    )}
+                >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    Chat
+                    {chatUnread > 0 && (
+                        <span className="bg-violet-500/15 text-violet-600 text-[9px] font-bold rounded-full px-1.5 py-0.5 leading-none">
+                            {chatUnread}
+                        </span>
+                    )}
+                </button>
+                <button
+                    onClick={() => setTab("inbox")}
+                    className={cn(
+                        "flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors",
+                        tab === "inbox"
+                            ? "border-violet-500 text-foreground"
+                            : "border-transparent text-muted-foreground hover:text-foreground",
+                    )}
+                >
+                    <Inbox className="w-3.5 h-3.5" />
+                    Sistema
+                    {inboxUnread > 0 && (
+                        <span className="bg-muted text-muted-foreground text-[9px] font-bold rounded-full px-1.5 py-0.5 leading-none">
+                            {inboxUnread}
+                        </span>
+                    )}
+                </button>
             </div>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {loading && (
-                    <div className="flex justify-center p-8">
-                        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            {/* ── INBOX TAB ── */}
+            {tab === "inbox" && (
+                <div className="flex-1 overflow-y-auto divide-y divide-border/20">
+                    {loading && <div className="flex justify-center p-6"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>}
+                    {!loading && inboxMsgs.length === 0 && (
+                        <div className="flex flex-col items-center gap-2 p-10 text-center">
+                            <Inbox className="w-7 h-7 text-muted-foreground/20" />
+                            <p className="text-xs text-muted-foreground/60">Nenhum evento de sistema ainda.</p>
+                        </div>
+                    )}
+                    {inboxMsgs.map(msg => (
+                        <MailRow
+                            key={msg.id}
+                            msg={msg}
+                            expanded={expandedId === msg.id}
+                            onToggle={() => {
+                                setExpandedId(prev => prev === msg.id ? null : msg.id)
+                                markRead(msg.id)
+                            }}
+                            unread={!readIds.has(msg.id)}
+                        />
+                    ))}
+                </div>
+            )}
+
+            {/* ── CHAT TAB ── */}
+            {tab === "chat" && (
+                <>
+                    <div className="flex-1 overflow-y-auto py-2 space-y-0.5">
+                        {loading && <div className="flex justify-center p-6"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>}
+                        {!loading && chatMsgs.length === 0 && (
+                            <div className="flex flex-col items-center gap-2 p-10 text-center">
+                                <Bot className="w-7 h-7 text-violet-200" />
+                                <p className="text-xs text-muted-foreground/60">O kernel vai falar com você aqui.</p>
+                            </div>
+                        )}
+                        {chatMsgs.map(msg => {
+                            if (!readIds.has(msg.id) && msg.role !== "user") markRead(msg.id)
+                            return <ChatLine key={msg.id} msg={msg} />
+                        })}
+                        {thinking && (
+                            <div className="flex items-center gap-2 px-3 py-1">
+                                <Bot className="w-3 h-3 text-violet-400 flex-shrink-0" />
+                                <span className="text-xs text-muted-foreground/60 italic">pensando…</span>
+                                <span className="flex gap-0.5">
+                                    {[0,1,2].map(i => (
+                                        <span key={i} className="w-1 h-1 rounded-full bg-violet-400/60 animate-bounce" style={{ animationDelay: `${i * 150}ms` }} />
+                                    ))}
+                                </span>
+                            </div>
+                        )}
+                        <div ref={chatBottomRef} />
                     </div>
-                )}
 
-                {isEmpty && (
-                    <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-8">
-                        <Bot className="w-10 h-10 text-violet-300" />
-                        <p className="text-sm text-muted-foreground">
-                            O Kernel vai aparecer aqui quando concluir tarefas ou tiver sugestões.
-                        </p>
+                    <div className="border-t border-border/50 px-3 py-2 flex gap-2 items-center bg-background/60">
+                        <input
+                            type="text"
+                            value={input}
+                            onChange={e => setInput(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleSend() } }}
+                            placeholder="Responder…"
+                            className="flex-1 h-7 px-2.5 text-xs rounded-md bg-muted/50 border border-border/50 focus:outline-none focus:border-violet-400/50 placeholder:text-muted-foreground/40 transition-colors"
+                        />
+                        <button
+                            onClick={handleSend}
+                            disabled={!input.trim() || sending}
+                            className="w-7 h-7 flex items-center justify-center rounded-md bg-violet-500/90 text-white disabled:opacity-30 hover:bg-violet-600 transition-colors"
+                        >
+                            {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                        </button>
                     </div>
-                )}
-
-                {messages.map(msg => (
-                    <KernelBubble key={msg.id} msg={msg} />
-                ))}
-
-                <div ref={bottomRef} />
-            </div>
-
-            {/* Input */}
-            <div className="border-t border-border/50 p-3">
-                <div className="flex gap-2 items-end">
-                    <input
-                        type="text"
-                        value={input}
-                        onChange={e => setInput(e.target.value)}
-                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-                        placeholder="Responda ao kernel…"
-                        className="flex-1 min-h-[38px] px-3 py-2 text-sm rounded-xl bg-card border border-border/60 focus:outline-none focus:border-violet-400/60 resize-none"
-                    />
-                    <button
-                        onClick={handleSend}
-                        disabled={!input.trim() || sending}
-                        className="w-9 h-9 flex items-center justify-center rounded-xl bg-violet-500 text-white disabled:opacity-40 hover:bg-violet-600 transition-colors flex-shrink-0"
-                    >
-                        {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    </button>
-                </div>
-            </div>
+                </>
+            )}
         </div>
     )
 }

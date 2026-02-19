@@ -7,7 +7,12 @@ const viewLabels: Record<string, string> = {
     project: "Project",
     agents: "Agents",
     tools: "Tools",
+    workflows: "Workflows",
     jobs: "Jobs",
+    traces: "Traces",
+    tasks: "Tasks",
+    workers: "Workers",
+    kernel: "Kernel",
     settings: "Settings",
 }
 
