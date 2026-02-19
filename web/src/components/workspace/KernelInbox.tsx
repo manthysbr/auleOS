@@ -26,9 +26,14 @@ function detectKind(msg: KernelMessage): MsgKind {
     return "info"
 }
 
-// System kinds go to Inbox tab; conversational kinds go to Chat tab
-const SYSTEM_KINDS: MsgKind[] = ["job_completed", "job_failed", "info"]
-const CHAT_KINDS: MsgKind[] = ["welcome", "suggestion", "question", "user"]
+function isSystemEmail(msg: KernelMessage): boolean {
+    const kind = detectKind(msg)
+    return msg.role === "kernel" && (kind === "job_completed" || kind === "job_failed" || kind === "info")
+}
+
+function isChatMessage(msg: KernelMessage): boolean {
+    return !isSystemEmail(msg)
+}
 
 const INBOX_META: Record<string, { icon: React.ReactNode; accent: string }> = {
     job_completed: { icon: <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />, accent: "border-l-emerald-400/50" },
@@ -193,13 +198,26 @@ export function KernelInbox() {
         if (tab === "chat") chatBottomRef.current?.scrollIntoView({ behavior: "smooth" })
     }, [messages, tab])
 
-    const inboxMsgs = messages.filter(m => SYSTEM_KINDS.includes(detectKind(m)))
-    const chatMsgs  = messages.filter(m => CHAT_KINDS.includes(detectKind(m)))
+    const inboxMsgs = messages.filter(isSystemEmail)
+    const chatMsgs = messages.filter(isChatMessage)
 
     const inboxUnread = inboxMsgs.filter(m => !readIds.has(m.id)).length
     const chatUnread  = chatMsgs.filter(m => m.role !== "user" && !readIds.has(m.id)).length
 
     const markRead = (id: string) => setReadIds(prev => new Set([...prev, id]))
+
+    useEffect(() => {
+        if (tab !== "chat") return
+        const unreadIncoming = chatMsgs
+            .filter(msg => msg.role !== "user" && !readIds.has(msg.id))
+            .map(msg => msg.id)
+        if (unreadIncoming.length === 0) return
+        setReadIds(prev => {
+            const next = new Set(prev)
+            for (const id of unreadIncoming) next.add(id)
+            return next
+        })
+    }, [tab, chatMsgs, readIds])
 
     const handleSend = async () => {
         const text = input.trim()
@@ -307,10 +325,9 @@ export function KernelInbox() {
                                 <p className="text-xs text-muted-foreground/60">O kernel vai falar com você aqui.</p>
                             </div>
                         )}
-                        {chatMsgs.map(msg => {
-                            if (!readIds.has(msg.id) && msg.role !== "user") markRead(msg.id)
-                            return <ChatLine key={msg.id} msg={msg} />
-                        })}
+                        {chatMsgs.map(msg => (
+                            <ChatLine key={msg.id} msg={msg} />
+                        ))}
                         {thinking && (
                             <div className="flex items-center gap-2 px-3 py-1">
                                 <Bot className="w-3 h-3 text-violet-400 flex-shrink-0" />
